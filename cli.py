@@ -108,7 +108,7 @@ def bootstrap(source, limit, conversation):
 @cli.command()
 def summarize():
     click.echo('Running tier 0 summarization...')
-    created = run_tier0_summarization()
+    created = run_tier0_summarization(on_progress=lambda msg: click.echo(f'  {msg}'))
     click.echo(f'Created {created} tier 0 summaries')
 
 

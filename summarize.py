@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, UTC
 from sqlalchemy import func
-from db import get_session, Observation, Summary, Model
+from db import get_session, Observation, Summary, Model, BASE_MODELS
 from llm import client, MODEL, MAX_TOKENS, CHARS_PER_TOKEN, estimate_tokens
 
 SPAN = timedelta(days=1)
@@ -15,6 +15,74 @@ Example:
 "Family: wife Yael 44, kids Tom 11 and Yara 5. IMPORTANT: Currently nomadic since March 2025. Living in Greece temporarily, planning Israel visit."
 
 Be concise. Preserve specific facts: names, dates, numbers, places."""
+
+ASSIGN_MODEL_TOOL = {
+    "type": "function", 
+    "function": {
+        "name": "assign_model",
+        "description": "Assign an observation to a mental model",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "observation_id": {"type": "integer"},
+                "model_name": {"type": "string", "description": "Model name: self, user, system, or a new topic name"}
+            },
+            "required": ["observation_id", "model_name"]
+        }
+    }
+}
+
+
+def get_models_context(session):
+    models = session.query(Model).all()
+    lines = ["Available models:"]
+    for m in models:
+        lines.append(f"- {m.name}: {m.description or '(no description)'}")
+    return "\n".join(lines)
+
+
+def assign_models_to_observations(session, observations):
+    if not observations:
+        return
+    
+    models_context = get_models_context(session)
+    
+    obs_text = "\n".join(f"[{obs.id}] {obs.text}" for obs in observations)
+    
+    prompt = f"""{models_context}
+
+Assign each observation to the most appropriate model. Use 'user' for facts about the primary user, 'self' for agent experiences, 'system' for technical details. Create new models only for major recurring topics.
+
+Observations:
+{obs_text}"""
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": "You assign observations to mental models. Call assign_model for each observation."},
+            {"role": "user", "content": prompt}
+        ],
+        tools=[ASSIGN_MODEL_TOOL],
+        tool_choice="required"
+    )
+    
+    for tool_call in response.choices[0].message.tool_calls or []:
+        if tool_call.function.name == "assign_model":
+            args = json.loads(tool_call.function.arguments)
+            obs_id = args['observation_id']
+            model_name = args['model_name'].lower().strip()
+            
+            model = session.query(Model).filter_by(name=model_name).first()
+            if not model:
+                model = Model(name=model_name, is_base=False)
+                session.add(model)
+                session.flush()
+            
+            obs = session.query(Observation).get(obs_id)
+            if obs:
+                obs.model_id = model.id
+    
+    session.commit()
 
 
 def get_day_start(dt):
@@ -86,33 +154,52 @@ def summarize_chunk(observations):
     return response.choices[0].message.content
 
 
-def run_tier0_summarization():
+def run_tier0_summarization(on_progress=None):
     session = get_session()
+    
+    unassigned = session.query(Observation).filter(Observation.model_id == None).all()
+    if unassigned:
+        if on_progress:
+            on_progress(f"Assigning {len(unassigned)} observations to models...")
+        assign_models_to_observations(session, unassigned)
+    
     by_day = get_observations_by_day(session)
     
     created = 0
     for day, observations in sorted(by_day.items()):
-        existing = session.query(Summary).filter(
-            Summary.tier == 0,
-            Summary.start_timestamp == day,
-            Summary.end_timestamp == day + SPAN
-        ).first()
+        by_model = {}
+        for obs in observations:
+            model_id = obs.model_id
+            if model_id not in by_model:
+                by_model[model_id] = []
+            by_model[model_id].append(obs)
         
-        if existing:
-            continue
-        
-        summary_text = summarize_observations(observations)
-        
-        default_model = session.query(Model).filter_by(name='self').first()
-        summary = Summary(
-            model_id=default_model.id,
-            tier=0,
-            text=summary_text,
-            start_timestamp=day,
-            end_timestamp=day + SPAN
-        )
-        session.add(summary)
-        created += 1
+        for model_id, model_obs in by_model.items():
+            existing = session.query(Summary).filter(
+                Summary.tier == 0,
+                Summary.model_id == model_id,
+                Summary.start_timestamp == day,
+                Summary.end_timestamp == day + SPAN
+            ).first()
+            
+            if existing:
+                continue
+            
+            model = session.query(Model).get(model_id)
+            if on_progress:
+                on_progress(f"Summarizing {day.date()} [{model.name}] ({len(model_obs)} obs)...")
+            
+            summary_text = summarize_observations(model_obs)
+            
+            summary = Summary(
+                model_id=model_id,
+                tier=0,
+                text=summary_text,
+                start_timestamp=day,
+                end_timestamp=day + SPAN
+            )
+            session.add(summary)
+            created += 1
     
     session.commit()
     session.close()
