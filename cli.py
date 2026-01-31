@@ -60,7 +60,8 @@ def models():
 @click.option('--source', required=True, help='Path to source database')
 @click.option('--limit', '-n', default=None, type=int, help='Limit number of messages to process')
 @click.option('--conversation', '-c', default=None, type=int, help='Process specific conversation ID')
-def bootstrap(source, limit, conversation):
+@click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
+def bootstrap(source, limit, conversation, parallel):
     source_engine = create_engine(f'sqlite:///{source}')
     
     query = "SELECT role, content, timestamp FROM messages WHERE content IS NOT NULL AND content != ''"
@@ -80,15 +81,12 @@ def bootstrap(source, limit, conversation):
         click.echo('No messages to process.')
         return
     
-    def progress(chunk_num, total_chunks, msgs_in_chunk, timestamp, obs_count=None):
+    def progress(completed, total, msgs_in_chunk, timestamp, obs_count):
         ts_str = timestamp[:10] if timestamp else '?'
-        if obs_count is None:
-            click.echo(f'  Chunk {chunk_num}/{total_chunks} ({msgs_in_chunk} msgs, {ts_str})...', nl=False)
-        else:
-            click.echo(f' {obs_count} obs')
+        click.echo(f'  [{completed}/{total}] {ts_str}: {obs_count} obs')
     
-    click.echo('Extracting observations...')
-    observations = extract_observations(messages, on_progress=progress)
+    click.echo(f'Extracting observations ({parallel} workers)...')
+    observations = extract_observations(messages, on_progress=progress, max_workers=parallel)
     click.echo(f'Total: {len(observations)} observations')
     
     session = get_session()

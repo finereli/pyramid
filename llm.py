@@ -1,5 +1,6 @@
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -75,36 +76,50 @@ def chunk_messages(messages, max_tokens=MAX_TOKENS):
     return chunks
 
 
-def extract_observations(messages, on_progress=None):
+def process_chunk(chunk):
+    chunk_timestamp = chunk[-1].get('timestamp') if chunk else None
+    conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in chunk if m['content'])
+    
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": OBSERVE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Extract observations from this conversation:\n\n{conversation_text}"}
+        ],
+        tools=[OBSERVE_TOOL],
+        tool_choice="auto"
+    )
+    
+    observations = []
+    for tool_call in response.choices[0].message.tool_calls or []:
+        if tool_call.function.name == "add_observation":
+            args = json.loads(tool_call.function.arguments)
+            args['timestamp'] = chunk_timestamp
+            observations.append(args)
+    
+    return observations, chunk_timestamp
+
+
+def extract_observations(messages, on_progress=None, max_workers=10):
     chunks = chunk_messages(messages)
-    all_observations = []
+    total_chunks = len(chunks)
     
-    for i, chunk in enumerate(chunks):
-        chunk_timestamp = chunk[-1].get('timestamp') if chunk else None
-        conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in chunk if m['content'])
-        
-        if on_progress:
-            on_progress(i + 1, len(chunks), len(chunk), chunk_timestamp)
-        
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": OBSERVE_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Extract observations from this conversation:\n\n{conversation_text}"}
-            ],
-            tools=[OBSERVE_TOOL],
-            tool_choice="auto"
-        )
-        
-        chunk_obs = 0
-        for tool_call in response.choices[0].message.tool_calls or []:
-            if tool_call.function.name == "add_observation":
-                args = json.loads(tool_call.function.arguments)
-                args['timestamp'] = chunk_timestamp
-                all_observations.append(args)
-                chunk_obs += 1
-        
-        if on_progress:
-            on_progress(i + 1, len(chunks), len(chunk), chunk_timestamp, chunk_obs)
+    if total_chunks == 0:
+        return []
     
-    return all_observations
+    all_observations = [None] * total_chunks
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_chunk, chunk): i for i, chunk in enumerate(chunks)}
+        completed = 0
+        
+        for future in as_completed(futures):
+            i = futures[future]
+            observations, chunk_timestamp = future.result()
+            all_observations[i] = observations
+            completed += 1
+            
+            if on_progress:
+                on_progress(completed, total_chunks, len(chunks[i]), chunk_timestamp, len(observations))
+    
+    return [obs for chunk_obs in all_observations for obs in chunk_obs]
