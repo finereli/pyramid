@@ -173,32 +173,44 @@ def model(name):
 
 
 @cli.command()
-@click.option('--limit', '-n', default=10, help='Number of results')
-def embed(limit):
+def embed():
     session = get_session()
     
     conn = sqlite3.connect('memory.db')
     enable_vec(conn)
     
     conn.execute(f"""
-        CREATE VIRTUAL TABLE IF NOT EXISTS observations_vec USING vec0(
-            observation_id INTEGER PRIMARY KEY,
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+            id INTEGER PRIMARY KEY,
+            source_type TEXT,
+            source_id INTEGER,
             embedding float[{EMBEDDING_DIM}]
         )
     """)
     
-    existing = set(row[0] for row in conn.execute("SELECT observation_id FROM observations_vec").fetchall())
+    existing = set(
+        (row[0], row[1]) 
+        for row in conn.execute("SELECT source_type, source_id FROM memory_vec").fetchall()
+    )
     
     observations = session.query(Observation).all()
-    to_embed = [o for o in observations if o.id not in existing]
+    summaries = session.query(Summary).all()
     
-    click.echo(f'Embedding {len(to_embed)} observations...')
+    to_embed = []
+    for obs in observations:
+        if ('observation', obs.id) not in existing:
+            to_embed.append(('observation', obs.id, obs.text))
+    for s in summaries:
+        if ('summary', s.id) not in existing:
+            to_embed.append(('summary', s.id, s.text))
     
-    for i, obs in enumerate(to_embed):
-        embedding = get_embedding(obs.text)
+    click.echo(f'Embedding {len(to_embed)} items...')
+    
+    for i, (source_type, source_id, text) in enumerate(to_embed):
+        embedding = get_embedding(text)
         conn.execute(
-            "INSERT INTO observations_vec (observation_id, embedding) VALUES (?, ?)",
-            [obs.id, serialize_embedding(embedding)]
+            "INSERT INTO memory_vec (source_type, source_id, embedding) VALUES (?, ?, ?)",
+            [source_type, source_id, serialize_embedding(embedding)]
         )
         if (i + 1) % 10 == 0:
             click.echo(f'  {i + 1}/{len(to_embed)}')
@@ -207,13 +219,16 @@ def embed(limit):
     conn.commit()
     conn.close()
     session.close()
-    click.echo(f'Done. {len(to_embed)} observations embedded.')
+    click.echo(f'Done. {len(to_embed)} items embedded.')
 
 
 @cli.command()
 @click.argument('query')
-@click.option('--limit', '-n', default=10, help='Number of results')
-def search(query, limit):
+@click.option('--limit', '-n', default=20, help='Number of results to retrieve')
+@click.option('--raw', is_flag=True, help='Show raw results without LLM synthesis')
+def search(query, limit, raw):
+    from llm import client, MODEL
+    
     session = get_session()
     
     conn = sqlite3.connect('memory.db')
@@ -222,8 +237,8 @@ def search(query, limit):
     query_embedding = get_embedding(query)
     
     results = conn.execute(f"""
-        SELECT observation_id, distance
-        FROM observations_vec
+        SELECT source_type, source_id, distance
+        FROM memory_vec
         WHERE embedding MATCH ?
         ORDER BY distance
         LIMIT ?
@@ -233,13 +248,37 @@ def search(query, limit):
         click.echo('No results. Run "embed" first to create embeddings.')
         return
     
-    for obs_id, distance in results:
-        obs = session.get(Observation, obs_id)
-        if obs:
-            model_name = obs.model.name if obs.model else '-'
-            click.echo(f'[{distance:.3f}] [{model_name}] {obs.text}')
+    context_items = []
+    for source_type, source_id, distance in results:
+        if source_type == 'observation':
+            item = session.get(Observation, source_id)
+            if item:
+                context_items.append(f"[obs] {item.text}")
+        else:
+            item = session.get(Summary, source_id)
+            if item:
+                model_name = item.model.name if item.model else '?'
+                context_items.append(f"[{model_name} T{item.tier}] {item.text}")
     
     conn.close()
+    
+    if raw:
+        for i, (source_type, source_id, distance) in enumerate(results):
+            click.echo(f'[{distance:.3f}] {context_items[i]}')
+        session.close()
+        return
+    
+    context = "\n\n".join(context_items)
+    
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": "Answer questions based on the memory context provided. Be concise and direct. If the answer isn't in the context, say so."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
+        ]
+    )
+    
+    click.echo(response.choices[0].message.content)
     session.close()
 
 
