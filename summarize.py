@@ -231,8 +231,10 @@ def run_tier0_summarization(on_progress=None, max_workers=10):
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_task, task): task for task in tasks}
-        for future in as_completed(futures):
+        for i, future in enumerate(as_completed(futures), 1):
             results.append(future.result())
+            if on_progress:
+                on_progress(f"  [{i}/{len(tasks)}] completed")
     
     for day, model_id, summary_text in results:
         summary = Summary(
@@ -319,8 +321,10 @@ def run_higher_tier_summarization(on_progress=None, max_workers=10):
         results = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(process_task, task): task for task in tasks}
-            for future in as_completed(futures):
+            for i, future in enumerate(as_completed(futures), 1):
                 results.append(future.result())
+                if on_progress:
+                    on_progress(f"  [{i}/{len(tasks)}] completed")
         
         for model_id, new_tier, start_ts, end_ts, summary_text in results:
             summary = Summary(

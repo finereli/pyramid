@@ -133,7 +133,8 @@ def bootstrap(source, limit, conversation, parallel, no_summarize):
         click.echo(f'  Saved {len(observations)} observations')
         
         if not no_summarize:
-            created = run_tier0_summarization()
+            progress = lambda msg: click.echo(f'    {msg}')
+            created = run_tier0_summarization(on_progress=progress)
             if created:
                 click.echo(f'  Created {created} tier 0 summaries')
     
@@ -141,7 +142,8 @@ def bootstrap(source, limit, conversation, parallel, no_summarize):
     
     if not no_summarize:
         click.echo('\nRunning higher tier summarization...')
-        higher = run_higher_tier_summarization()
+        progress = lambda msg: click.echo(f'  {msg}')
+        higher = run_higher_tier_summarization(on_progress=progress)
         click.echo(f'Created {higher} higher tier summaries')
 
 
