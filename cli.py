@@ -1,8 +1,9 @@
 import click
 from datetime import datetime, UTC
 from sqlalchemy import create_engine, text
-from db import init_db, get_session, Observation, Model
+from db import init_db, get_session, Observation, Model, Summary
 from llm import extract_observations
+from summarize import run_tier0_summarization
 
 
 @click.group()
@@ -92,6 +93,30 @@ def bootstrap(source, limit, conversation):
     session.close()
     
     click.echo(f'Saved {len(observations)} observations to memory.db')
+
+
+@cli.command()
+def summarize():
+    click.echo('Running tier 0 summarization...')
+    created = run_tier0_summarization()
+    click.echo(f'Created {created} tier 0 summaries')
+
+
+@cli.command()
+@click.option('--tier', '-t', default=None, type=int, help='Filter by tier')
+def summaries(tier):
+    session = get_session()
+    query = session.query(Summary).order_by(Summary.tier, Summary.start_timestamp)
+    if tier is not None:
+        query = query.filter(Summary.tier == tier)
+    
+    for s in query.all():
+        model_name = s.model.name if s.model else '-'
+        click.echo(f'[T{s.tier}] {s.start_timestamp:%Y-%m-%d} - {s.end_timestamp:%Y-%m-%d} [{model_name}]')
+        click.echo(f'  {s.text}')
+        click.echo()
+    
+    session.close()
 
 
 if __name__ == '__main__':
