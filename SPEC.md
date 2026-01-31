@@ -1,4 +1,4 @@
-# Narrative Memory System Specification
+# Pyramid Memory System Specification
 
 ## Overview
 
