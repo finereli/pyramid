@@ -12,7 +12,7 @@ SUMMARIZE_SYSTEM_PROMPT = """You are a memory agent creating summaries. Write te
 Mark critical information with IMPORTANT:, CRITICAL:, or ESSENTIAL: prefix.
 
 Example:
-"Family: wife Yael 44, kids Tom 11 and Yara 5. IMPORTANT: Currently nomadic since March 2025. Living in Greece temporarily, planning Israel visit."
+"Family: spouse Sam 38, daughter Mia 7. IMPORTANT: Relocated to Austin March 2025. CRITICAL: Starting new consulting practice."
 
 Be concise. Preserve specific facts: names, dates, numbers, places."""
 
