@@ -177,7 +177,9 @@ def summarize_summaries(summaries):
     return response.choices[0].message.content
 
 
-def run_tier0_summarization(on_progress=None):
+def run_tier0_summarization(on_progress=None, max_workers=10):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
     session = get_session()
     
     unassigned = session.query(Observation).filter(Observation.model_id == None).all()
@@ -188,7 +190,7 @@ def run_tier0_summarization(on_progress=None):
     
     by_day = get_observations_by_day(session)
     
-    created = 0
+    tasks = []
     for day, observations in sorted(by_day.items()):
         by_model = {}
         for obs in observations:
@@ -212,35 +214,54 @@ def run_tier0_summarization(on_progress=None):
                 continue
             
             model = session.query(Model).get(model_id)
-            if on_progress:
-                on_progress(f"Summarizing {day.date()} [{model.name}] ({len(model_obs)} obs)...")
-            
-            summary_text = summarize_observations(model_obs)
-            
-            summary = Summary(
-                model_id=model_id,
-                tier=0,
-                text=summary_text,
-                start_timestamp=day,
-                end_timestamp=day + SPAN
-            )
-            session.add(summary)
-            created += 1
+            tasks.append((day, model_id, model.name, model_obs))
+    
+    if not tasks:
+        session.close()
+        return 0
+    
+    if on_progress:
+        on_progress(f"Summarizing {len(tasks)} day/model combinations...")
+    
+    def process_task(task):
+        day, model_id, model_name, model_obs = task
+        summary_text = summarize_observations(model_obs)
+        return (day, model_id, summary_text)
+    
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_task, task): task for task in tasks}
+        for future in as_completed(futures):
+            results.append(future.result())
+    
+    for day, model_id, summary_text in results:
+        summary = Summary(
+            model_id=model_id,
+            tier=0,
+            text=summary_text,
+            start_timestamp=day,
+            end_timestamp=day + SPAN
+        )
+        session.add(summary)
     
     session.commit()
     session.close()
-    return created
+    return len(results)
 
 
-def run_higher_tier_summarization(on_progress=None):
+def run_higher_tier_summarization(on_progress=None, max_workers=10):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
     session = get_session()
     models = session.query(Model).all()
     
     total_created = 0
+    tier = 0
     
-    for model in models:
-        tier = 0
-        while True:
+    while True:
+        tasks = []
+        
+        for model in models:
             summaries = session.query(Summary).filter(
                 Summary.model_id == model.id,
                 Summary.tier == tier
@@ -258,11 +279,10 @@ def run_higher_tier_summarization(on_progress=None):
                     unsummarized.append(s)
             
             if len(unsummarized) < STEP:
-                break
+                continue
             
             for i in range(0, len(unsummarized) - STEP + 1, STEP):
                 chunk = unsummarized[i:i + STEP]
-                
                 start_ts = chunk[0].start_timestamp
                 end_ts = chunk[-1].end_timestamp
                 
@@ -276,25 +296,46 @@ def run_higher_tier_summarization(on_progress=None):
                 if existing:
                     continue
                 
-                if on_progress:
-                    on_progress(f"T{tier + 1} [{model.name}] {start_ts.date()} - {end_ts.date()}...")
-                
-                summary_text = summarize_summaries(chunk)
-                
-                summary = Summary(
-                    model_id=model.id,
-                    tier=tier + 1,
-                    text=summary_text,
-                    start_timestamp=start_ts,
-                    end_timestamp=end_ts
-                )
-                session.add(summary)
-                total_created += 1
+                chunk_texts = [s.text for s in chunk]
+                tasks.append((model.id, model.name, tier + 1, start_ts, end_ts, chunk_texts))
+        
+        if not tasks:
+            break
+        
+        if on_progress:
+            on_progress(f"T{tier + 1}: {len(tasks)} summaries across models...")
+        
+        def process_task(task):
+            model_id, model_name, new_tier, start_ts, end_ts, chunk_texts = task
             
-            session.commit()
-            tier += 1
+            class FakeSummary:
+                def __init__(self, text):
+                    self.text = text
+            
+            fake_summaries = [FakeSummary(t) for t in chunk_texts]
+            summary_text = summarize_summaries(fake_summaries)
+            return (model_id, new_tier, start_ts, end_ts, summary_text)
+        
+        results = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_task, task): task for task in tasks}
+            for future in as_completed(futures):
+                results.append(future.result())
+        
+        for model_id, new_tier, start_ts, end_ts, summary_text in results:
+            summary = Summary(
+                model_id=model_id,
+                tier=new_tier,
+                text=summary_text,
+                start_timestamp=start_ts,
+                end_timestamp=end_ts
+            )
+            session.add(summary)
+            total_created += 1
+        
+        session.commit()
+        tier += 1
     
-    session.commit()
     session.close()
     return total_created
 

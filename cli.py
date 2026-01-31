@@ -2,7 +2,7 @@ import click
 import sqlite3
 from datetime import datetime, UTC
 from sqlalchemy import create_engine, text
-from db import init_db, get_session, get_engine, Observation, Model
+from db import init_db, get_session, get_engine, Observation, Model, Summary
 from llm import extract_observations
 from summarize import run_tier0_summarization, run_higher_tier_summarization, run_all_summarization
 from embeddings import get_embedding, enable_vec, serialize_embedding, EMBEDDING_DIM
@@ -56,12 +56,31 @@ def models():
     session.close()
 
 
+def get_week_key(timestamp_str):
+    if not timestamp_str:
+        return 'unknown'
+    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+    year, week, _ = dt.isocalendar()
+    return f'{year}-W{week:02d}'
+
+
+def group_messages_by_week(messages):
+    by_week = {}
+    for msg in messages:
+        week = get_week_key(msg.get('timestamp', ''))
+        if week not in by_week:
+            by_week[week] = []
+        by_week[week].append(msg)
+    return by_week
+
+
 @cli.command()
 @click.option('--source', required=True, help='Path to source database')
 @click.option('--limit', '-n', default=None, type=int, help='Limit number of messages to process')
 @click.option('--conversation', '-c', default=None, type=int, help='Process specific conversation ID')
 @click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
-def bootstrap(source, limit, conversation, parallel):
+@click.option('--no-summarize', is_flag=True, help='Skip summarization during bootstrap')
+def bootstrap(source, limit, conversation, parallel, no_summarize):
     source_engine = create_engine(f'sqlite:///{source}')
     
     query = "SELECT role, content, timestamp FROM messages WHERE content IS NOT NULL AND content != ''"
@@ -81,29 +100,49 @@ def bootstrap(source, limit, conversation, parallel):
         click.echo('No messages to process.')
         return
     
-    def progress(completed, total, msgs_in_chunk, timestamp, obs_count):
-        ts_str = timestamp[:10] if timestamp else '?'
-        click.echo(f'  [{completed}/{total}] {ts_str}: {obs_count} obs')
+    by_week = group_messages_by_week(messages)
+    weeks = sorted(by_week.keys())
+    click.echo(f'Processing {len(weeks)} weeks...')
     
-    click.echo(f'Extracting observations ({parallel} workers)...')
-    observations = extract_observations(messages, on_progress=progress, max_workers=parallel)
-    click.echo(f'Total: {len(observations)} observations')
+    total_observations = 0
     
-    session = get_session()
-    for obs_data in observations:
-        ts = obs_data.get('timestamp')
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
-        obs = Observation(
-            text=obs_data['text'],
-            importance=obs_data['importance'],
-            timestamp=ts or datetime.now(UTC)
-        )
-        session.add(obs)
-    session.commit()
-    session.close()
+    for week in weeks:
+        week_messages = by_week[week]
+        click.echo(f'\n{week}: {len(week_messages)} messages')
+        
+        def progress(completed, total, msgs_in_chunk, timestamp, obs_count):
+            click.echo(f'  [{completed}/{total}] {obs_count} obs')
+        
+        observations = extract_observations(week_messages, on_progress=progress, max_workers=parallel)
+        
+        session = get_session()
+        for obs_data in observations:
+            ts = obs_data.get('timestamp')
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+            obs = Observation(
+                text=obs_data['text'],
+                importance=obs_data['importance'],
+                timestamp=ts or datetime.now(UTC)
+            )
+            session.add(obs)
+        session.commit()
+        session.close()
+        
+        total_observations += len(observations)
+        click.echo(f'  Saved {len(observations)} observations')
+        
+        if not no_summarize:
+            created = run_tier0_summarization()
+            if created:
+                click.echo(f'  Created {created} tier 0 summaries')
     
-    click.echo(f'Saved {len(observations)} observations to memory.db')
+    click.echo(f'\nTotal: {total_observations} observations')
+    
+    if not no_summarize:
+        click.echo('\nRunning higher tier summarization...')
+        higher = run_higher_tier_summarization()
+        click.echo(f'Created {higher} higher tier summaries')
 
 
 @cli.command()
