@@ -33,20 +33,19 @@ OBSERVE_TOOL = {
     }
 }
 
-OBSERVE_SYSTEM_PROMPT = """You are a memory agent reflecting on conversations. Your job is to extract observations from the conversation provided.
+OBSERVE_SYSTEM_PROMPT = """You are a memory agent extracting facts from conversations.
 
-Observations are:
-- First person ("I learned...", "Eli mentioned...", "We discussed...")
-- Single sentences capturing one idea
-- About the agent (self), the user, or topics discussed
+Capture SPECIFIC DETAILS, not meta-observations.
 
-Rate importance:
-- 1-3: Trivial, routine
-- 4-6: Normal, useful context  
-- 7-8: Notable, worth remembering
-- 9-10: Critical, essential to remember
+BAD: "The user shared family information"
+GOOD: "User's son Tom is 8 years old"
 
-Call add_observation for each distinct observation. Extract multiple observations from the conversation."""
+BAD: "We discussed their preferences"  
+GOOD: "User prefers dark mode in all apps"
+
+Write in first person. Include names, places, dates, numbers, preferences.
+
+Importance: 1-3 trivial, 4-6 useful, 7-8 notable, 9-10 critical."""
 
 
 def estimate_tokens(text):
