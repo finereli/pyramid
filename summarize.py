@@ -51,7 +51,7 @@ def assign_models_to_observations(session, observations):
     
     prompt = f"""{models_context}
 
-Assign each observation to the most appropriate model. Use 'user' for facts about the primary user, 'self' for agent experiences, 'system' for technical details. Create new models only for major recurring topics.
+Assign each observation to the most appropriate model. Create new models for distinct entities (people, projects, companies) that have multiple observations.
 
 Observations:
 {obs_text}"""
