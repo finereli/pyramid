@@ -280,13 +280,6 @@ def run_higher_tier_summarization(on_progress=None):
             
             session.commit()
             tier += 1
-        
-        top_summary = session.query(Summary).filter(
-            Summary.model_id == model.id
-        ).order_by(Summary.tier.desc()).first()
-        
-        if top_summary and (not model.is_base or not model.description or model.description == BASE_MODELS.get(model.name)):
-            model.description = top_summary.text[:200] + "..." if len(top_summary.text) > 200 else top_summary.text
     
     session.commit()
     session.close()
