@@ -80,6 +80,7 @@ def extract_observations(messages):
     all_observations = []
     
     for chunk in chunks:
+        chunk_timestamp = chunk[-1].get('timestamp') if chunk else None
         conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in chunk if m['content'])
         
         response = client.chat.completions.create(
@@ -95,6 +96,7 @@ def extract_observations(messages):
         for tool_call in response.choices[0].message.tool_calls or []:
             if tool_call.function.name == "add_observation":
                 args = json.loads(tool_call.function.arguments)
+                args['timestamp'] = chunk_timestamp
                 all_observations.append(args)
     
     return all_observations

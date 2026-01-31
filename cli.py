@@ -83,10 +83,13 @@ def bootstrap(source, limit, conversation):
     
     session = get_session()
     for obs_data in observations:
+        ts = obs_data.get('timestamp')
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
         obs = Observation(
             text=obs_data['text'],
             importance=obs_data['importance'],
-            timestamp=datetime.now(UTC)
+            timestamp=ts or datetime.now(UTC)
         )
         session.add(obs)
     session.commit()
