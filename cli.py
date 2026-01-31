@@ -1,6 +1,8 @@
 import click
 from datetime import datetime, UTC
+from sqlalchemy import create_engine, text
 from db import init_db, get_session, Observation, Model
+from llm import extract_observations
 
 
 @click.group()
@@ -48,6 +50,48 @@ def models():
         click.echo(f'{base_marker} {m.name}: {desc}')
     
     session.close()
+
+
+@cli.command()
+@click.option('--source', required=True, help='Path to source database')
+@click.option('--limit', '-n', default=None, type=int, help='Limit number of messages to process')
+@click.option('--conversation', '-c', default=None, type=int, help='Process specific conversation ID')
+def bootstrap(source, limit, conversation):
+    source_engine = create_engine(f'sqlite:///{source}')
+    
+    query = "SELECT role, content, timestamp FROM messages WHERE content IS NOT NULL AND content != ''"
+    if conversation:
+        query += f" AND conversation_id = {conversation}"
+    query += " ORDER BY timestamp"
+    if limit:
+        query += f" LIMIT {limit}"
+    
+    with source_engine.connect() as conn:
+        result = conn.execute(text(query))
+        messages = [{'role': row[0], 'content': row[1], 'timestamp': row[2]} for row in result]
+    
+    click.echo(f'Loaded {len(messages)} messages from {source}')
+    
+    if not messages:
+        click.echo('No messages to process.')
+        return
+    
+    click.echo('Extracting observations...')
+    observations = extract_observations(messages)
+    click.echo(f'Extracted {len(observations)} observations')
+    
+    session = get_session()
+    for obs_data in observations:
+        obs = Observation(
+            text=obs_data['text'],
+            importance=obs_data['importance'],
+            timestamp=datetime.now(UTC)
+        )
+        session.add(obs)
+    session.commit()
+    session.close()
+    
+    click.echo(f'Saved {len(observations)} observations to memory.db')
 
 
 if __name__ == '__main__':
