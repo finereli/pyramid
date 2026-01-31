@@ -70,7 +70,7 @@ Observations:
         if tool_call.function.name == "assign_model":
             args = json.loads(tool_call.function.arguments)
             obs_id = args['observation_id']
-            model_name = args['model_name'].lower().strip()
+            model_name = args['model_name'].lower().strip().replace(' ', '-')
             
             model = session.query(Model).filter_by(name=model_name).first()
             if not model:
@@ -188,6 +188,9 @@ def run_tier0_summarization(on_progress=None):
             by_model[model_id].append(obs)
         
         for model_id, model_obs in by_model.items():
+            if model_id is None:
+                continue
+            
             existing = session.query(Summary).filter(
                 Summary.tier == 0,
                 Summary.model_id == model_id,
