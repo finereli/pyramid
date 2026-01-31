@@ -7,14 +7,15 @@ from llm import client, MODEL, MAX_TOKENS, CHARS_PER_TOKEN, estimate_tokens
 SPAN = timedelta(days=1)
 STEP = 3
 
-SUMMARIZE_SYSTEM_PROMPT = """You are a memory agent creating summaries. Write telegram-style: short, dense sentences capturing the gist.
+SUMMARIZE_SYSTEM_PROMPT = """You are a memory agent creating summaries. Write telegram-style: short, dense sentences.
 
-Mark critical information with IMPORTANT:, CRITICAL:, or ESSENTIAL: prefix.
+OUTPUT FORMAT:
+- Each line starts with [N] where N is importance (1-10)
+- Use IMPORTANT:/CRITICAL:/ESSENTIAL: inline to emphasize key facts within a line
+- Example: "[7] User relocated to Austin. CRITICAL: Starting consulting practice May 2025."
+- Example: "[5] Family: spouse Sam 38, daughter Mia 7."
 
-Example:
-"Family: spouse Sam 38, daughter Mia 7. IMPORTANT: Relocated to Austin March 2025. CRITICAL: Starting new consulting practice."
-
-Be concise. Preserve specific facts: names, dates, numbers, places."""
+Preserve specific facts: names, dates, numbers, places."""
 
 ASSIGN_MODEL_TOOL = {
     "type": "function", 
@@ -56,10 +57,19 @@ Assign each observation to the most appropriate model. Create new models for dis
 Observations:
 {obs_text}"""
 
+    system_prompt = """You assign observations to mental models. Call assign_model for each observation.
+
+Base models (use these when appropriate):
+- self: Agent capabilities, preferences, tools used, learnings about being an assistant
+- user: Primary user identity, preferences, personal life events, general user info
+- system: Technical environment, configurations, software setup, tools
+
+Create new models for distinct entities (specific people, projects, companies, topics) that warrant separate tracking."""
+
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": "You assign observations to mental models. Call assign_model for each observation."},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ],
         tools=[ASSIGN_MODEL_TOOL],
@@ -135,7 +145,7 @@ def summarize_observations(observations):
         model=MODEL,
         messages=[
             {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Combine these summaries into one:\n\n{combined}"}
+            {"role": "user", "content": f"Combine these summaries into one. Keep the [N] importance format:\n\n{combined}"}
         ]
     )
     return response.choices[0].message.content
@@ -148,7 +158,7 @@ def summarize_chunk(observations):
         model=MODEL,
         messages=[
             {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Summarize these observations (number is importance 1-10):\n\n{obs_text}"}
+            {"role": "user", "content": f"Summarize these observations. Each has [importance] prefix (1-10 scale). Preserve importance in output using same [N] format:\n\n{obs_text}"}
         ]
     )
     return response.choices[0].message.content
@@ -160,8 +170,8 @@ def summarize_summaries(summaries):
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT + "\n\nPreserve IMPORTANT/CRITICAL/ESSENTIAL markers from source summaries."},
-            {"role": "user", "content": f"Combine these summaries into one higher-level summary:\n\n{text}"}
+            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT + "\n\nPreserve [N] importance prefixes and IMPORTANT/CRITICAL/ESSENTIAL markers from source summaries."},
+            {"role": "user", "content": f"Combine these summaries into one higher-level summary. Keep the [N] importance format:\n\n{text}"}
         ]
     )
     return response.choices[0].message.content
