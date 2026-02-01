@@ -2,56 +2,54 @@
 
 ## Overview
 
-A pyramidal memory system for AI agents. The agent reflects on information and generates observations, which are compressed into tiered summaries organized around mental models.
+A pyramidal memory system for AI agents. The agent reflects on information and generates observations, which are compressed into tiered summaries organized around mental models, then synthesized into coherent narratives.
 
 ## Core Concepts
 
 ### Observations
 
-- Short text strings (usually single sentences) from the agent's first-person perspective
-- Stored with timestamp and importance (1-10+ scale)
+- Short text strings (usually single sentences) capturing specific facts
+- Stored with timestamp
 - Initially unassigned to any model (model_id=NULL)
-- Created via LLM tool calls: `add_observation(text, importance)`
+- Created via LLM tool calls: `add_observation(text)`
 
 ### Models
 
 Mental models about concepts - self, users, people, places, topics.
 
 **Base models (always present):**
-- `self` - the agent's experiences, capabilities, preferences
-- `user` - the primary user (Eli)
-- `system` - the technical environment
+- `self` - the agent's own experience as an independent entity
+- `user` - the primary user's identity, preferences, projects
+- `system` - the technical environment and tools
 
-**Discovered models:** Created during summarization when patterns emerge.
+**Discovered models:** Created during summarization when the LLM identifies distinct entities.
 
 Each model has:
-- `name` - unique identifier
-- `description` - derived from top-level summary
+- `name` - unique identifier (lowercase, hyphenated)
+- `description` - derived from observations
 - `is_base` - true for self/user/system
 
 ### Summaries
 
-Telegram-style compressed observations organized by tier.
+Narrative prose summaries organized by tier.
 
 **Constants:**
-- `SPAN = 1 day` - base time unit
-- `STEP = 3` - items per summary
+- `STEP = 10` - items per summary
 
 **Tier structure:**
-- Tier 0: Summarizes 1 day of observations
-- Tier 1: Summarizes 3 tier-0 summaries (3 days)
-- Tier 2: Summarizes 3 tier-1 summaries (9 days)
-- Tier N: Summarizes 3 tier-(N-1) summaries (3^N days)
+- Tier 0: Summarizes 10 observations
+- Tier 1: Summarizes 10 tier-0 summaries
+- Tier N: Summarizes 10 tier-(N-1) summaries
 
-**Importance markers in summaries:** IMPORTANT, CRITICAL, ESSENTIAL
+Summaries are written in clear, readable narrative prose. Importance is conveyed through word choice rather than markers.
 
 ### Pyramid Retrieval
 
-For any model, retrieve:
-- Last 3 tier-0 summaries (3 days detail)
-- Last 3 tier-1 summaries (9 days)
-- Last 3 tier-2 summaries (27 days)
-- ... up to highest tier
+For any model, retrieve all summaries from each tier, ordered by tier (highest first) and timestamp (newest first).
+
+### Model Synthesis
+
+When exporting, the pyramid and any unsummarized observations are synthesized into a coherent mental model using LLM. Newer details override older ones, facts are deduplicated, and the result is third-person narrative prose.
 
 ## Technical Design
 
@@ -66,8 +64,8 @@ For any model, retrieve:
 SQLite with sqlite-vec for embeddings.
 
 **Tables:**
-- `observations` - id, text, timestamp, model_id, importance, embedding
-- `summaries` - id, model_id, tier, text, start_timestamp, end_timestamp, embedding
+- `observations` - id, text, timestamp, model_id
+- `summaries` - id, model_id, tier, text, start_timestamp, end_timestamp
 - `models` - id, name, description, is_base
 
 ### Chunking
@@ -86,8 +84,7 @@ When processing exceeds MAX_TOKENS:
 {
     "name": "add_observation",
     "parameters": {
-        "text": {"type": "string", "description": "First-person observation"},
-        "importance": {"type": "integer", "description": "1-10+ scale"}
+        "text": {"type": "string", "description": "Single factual sentence"}
     }
 }
 ```
@@ -99,17 +96,19 @@ When processing exceeds MAX_TOKENS:
     "name": "assign_model",
     "parameters": {
         "observation_id": {"type": "integer"},
-        "model_name": {"type": "string", "description": "Existing or new model name"}
+        "model_name": {"type": "string", "description": "self, user, system, or new topic name"}
     }
 }
 ```
 
 ## CLI Commands
 
-- `observe <text> [--importance N]` - add observation manually
-- `list` - list observations
+- `observe <text>` - add observation manually
+- `list [-n N]` - list observations
 - `bootstrap --source <db>` - extract observations from conversation history
-- `summarize [--tier N]` - run summarization
+- `summarize [--clean] [--max-obs N] [--max-tier N]` - run summarization
+- `summaries [--tier N]` - list summaries
 - `models` - list models with descriptions
 - `model <name>` - show pyramid for a model
-- `search <query>` - semantic search
+- `embed` - generate embeddings
+- `search <query> [--raw]` - semantic search

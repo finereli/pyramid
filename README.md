@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (self, user, system, topics), and compresses them into tiered summaries. Query via semantic search or export to markdown files.
+A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (self, user, system, topics), compresses them into tiered summaries, and synthesizes coherent narratives. Query via semantic search or export to markdown files.
 
 ```bash
 pip install -r requirements.txt
@@ -15,15 +15,18 @@ python cli.py search "What does the user prefer?"
 
 ## System Architecture
 
-Pyramid Memory implements a hierarchical memory system designed for AI agents to maintain long-term context across conversations. The architecture has four layers:
+Pyramid Memory implements a hierarchical memory system designed for AI agents to maintain long-term context across conversations. The architecture has five layers:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                    SYNTHESIS LAYER                          │
+│  LLM synthesizes pyramids into coherent mental models       │
+├─────────────────────────────────────────────────────────────┤
 │                    RETRIEVAL LAYER                          │
 │  Pyramid retrieval, semantic search, markdown export        │
 ├─────────────────────────────────────────────────────────────┤
 │                    COMPRESSION LAYER                        │
-│  Tier 0: 1 day → Tier 1: 3 days → Tier 2: 9 days → ...     │
+│  Tier 0: 10 obs → Tier 1: 10 T0 → Tier 2: 10 T1 → ...      │
 ├─────────────────────────────────────────────────────────────┤
 │                    ORGANIZATION LAYER                       │
 │  Mental models: self, user, system, + discovered topics     │
@@ -37,12 +40,11 @@ Pyramid Memory implements a hierarchical memory system designed for AI agents to
 
 ### Observations
 
-First-person factual statements extracted from conversations.
+Factual statements extracted from conversations.
 
 **Schema:**
-- `text`: String, single sentence, first-person perspective
+- `text`: String, single factual sentence
 - `timestamp`: DateTime, when the observation occurred
-- `importance`: Integer 1-10+, where 1=trivial, 5=normal, 7=notable, 10=critical
 - `model_id`: Foreign key to the assigned mental model (initially NULL)
 
 **Extraction behavior:**
@@ -52,10 +54,10 @@ First-person factual statements extracted from conversations.
 
 **Example observations:**
 ```
-[7] User prefers dark mode in all applications
-[5] User relocated to Austin in May 2025
-[8] User is starting a consulting practice focused on AI
-[3] User mentioned enjoying coffee in the morning
+User prefers dark mode in all applications
+User relocated to Austin in May 2025
+User is starting a consulting practice focused on AI
+User mentioned enjoying coffee in the morning
 ```
 
 ### Mental Models
@@ -83,51 +85,50 @@ Categories that organize observations and summaries. Each model represents a con
 
 ### Summaries
 
-Telegram-style compressed text representing observations or lower-tier summaries. Uses a tiered structure where each tier compresses STEP (3) items from the tier below.
+Narrative prose summaries representing observations or lower-tier summaries. Uses a tiered structure where each tier compresses STEP (10) items from the tier below.
 
 **Tier structure:**
-| Tier | Covers | Formula |
-|------|--------|---------|
-| 0 | 1 day | SPAN = 1 day |
-| 1 | 3 days | SPAN × STEP¹ |
-| 2 | 9 days | SPAN × STEP² |
-| 3 | 27 days | SPAN × STEP³ |
-| N | 3^N days | SPAN × STEP^N |
+| Tier | Compresses | Count |
+|------|------------|-------|
+| 0 | 10 observations | 10 |
+| 1 | 10 tier-0 summaries | 100 |
+| 2 | 10 tier-1 summaries | 1000 |
+| N | 10 tier-(N-1) summaries | 10^(N+1) |
 
 **Schema:**
 - `model_id`: Foreign key to mental model
 - `tier`: Integer, compression level
-- `text`: Compressed summary text
+- `text`: Summary text in narrative prose
 - `start_timestamp`: DateTime, coverage start
 - `end_timestamp`: DateTime, coverage end
 
 **Summary format:**
-```
-[7] User relocated to Austin. CRITICAL: Starting consulting practice May 2025.
-[5] Family: spouse Sam 38, daughter Mia 7.
-[6] Prefers Python for scripting, TypeScript for web projects.
-```
 
-Each line:
-- Starts with `[N]` importance marker (1-10)
-- May include inline emphasis: `IMPORTANT:`, `CRITICAL:`, `ESSENTIAL:`
-- Preserves specific facts: names, dates, numbers, places
+Summaries are written in clear, readable narrative prose. Importance is conveyed through word choice (e.g., "significantly", "notably", "critically") rather than markers or scores. Specific facts (names, dates, numbers, places) are preserved.
 
 ### Pyramid Retrieval
 
-For any model, retrieves the last 3 summaries from each tier, providing both recent detail and long-term context.
+For any model, retrieves all summaries from each tier, ordered by tier (highest first) and timestamp (newest first).
 
 **Example pyramid for model with tiers 0-2:**
 ```
-Tier 2 (9-27 days):  [summary] [summary] [summary]
-Tier 1 (3-9 days):   [summary] [summary] [summary]
-Tier 0 (0-3 days):   [summary] [summary] [summary]
+Tier 2:  [summary covering 1000 observations]
+Tier 1:  [summary] [summary] ...
+Tier 0:  [summary] [summary] [summary] ...
 ```
 
 This structure ensures:
 - Recent events have high granularity
 - Older events are compressed but retained
 - Total context stays bounded regardless of history length
+
+### Model Synthesis
+
+When exporting to markdown, the pyramid and any unsummarized observations are synthesized into a coherent mental model:
+- Newer details override older ones (e.g., if age changes, use the most recent)
+- Duplicate facts are mentioned only once
+- Important historical context is preserved
+- Output is third-person narrative prose
 
 ## Database Schema
 
@@ -151,7 +152,6 @@ CREATE TABLE observations (
     id INTEGER PRIMARY KEY,
     text TEXT NOT NULL,
     timestamp DATETIME,
-    importance INTEGER DEFAULT 5,
     model_id INTEGER REFERENCES models(id)
 );
 ```
@@ -197,8 +197,7 @@ CREATE VIRTUAL TABLE memory_vec USING vec0(
 {
     "name": "add_observation",
     "parameters": {
-        "text": {"type": "string", "description": "First-person observation, single sentence"},
-        "importance": {"type": "integer", "description": "1-10+ scale"}
+        "text": {"type": "string", "description": "Single factual sentence"}
     }
 }
 ```
@@ -228,7 +227,7 @@ When processing exceeds MAX_TOKENS:
 Add a single observation manually.
 
 ```bash
-python cli.py observe "User prefers vim keybindings" --importance 6
+python cli.py observe "User prefers vim keybindings"
 ```
 
 ### `list`
@@ -238,7 +237,7 @@ List recent observations.
 python cli.py list --limit 50
 ```
 
-Output format: `[id] timestamp (importance) [model] text`
+Output format: `[id] timestamp [model] text`
 
 ### `bootstrap`
 Extract observations from existing conversation database.
@@ -271,10 +270,18 @@ timestamp TEXT   -- ISO timestamp
 Run summarization to compress observations and summaries.
 
 ```bash
-python cli.py summarize           # Run all tiers
-python cli.py summarize --tier 0  # Only tier 0 (observations → summaries)
-python cli.py summarize --tier 1  # Only higher tiers
+python cli.py summarize                # Run all tiers
+python cli.py summarize --clean        # Clear summaries and assignments first
+python cli.py summarize --max-obs 100  # Limit observations to process
+python cli.py summarize --max-tier 1   # Only build up to tier 1
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--clean` | Delete all summaries and model assignments before running |
+| `--max-obs` | Maximum observations to process (for testing) |
+| `--max-tier` | Maximum tier to build (e.g., 1 = only tier 0 and 1) |
+| `--parallel` | Number of parallel workers (default: 10) |
 
 ### `summaries`
 List all summaries.
@@ -321,11 +328,18 @@ python cli.py search "user's family" --limit 10 --raw
 
 ## Export System
 
-`export_models.py` exports memory to markdown files for workspace integration.
+`export_models.py` exports memory to markdown files for workspace integration. By default, it synthesizes each model's pyramid into coherent narrative prose.
 
 ```bash
 python export_models.py /path/to/workspace --db memory.db --force
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--db` | Path to database file (default: memory.db) |
+| `--force` | Force regenerate all files |
+| `--debug` | Include source info (tier, id, date range) |
+| `--no-synthesize` | Skip LLM synthesis, just concatenate summaries |
 
 ### Output Files
 
@@ -342,20 +356,22 @@ python export_models.py /path/to/workspace --db memory.db --force
 ```markdown
 ---
 name: user
-description: User relocated to Austin in May 2025
+description: Information about the primary human user
 ---
 
 # User
 
-## Recent
-[7] User relocated to Austin. CRITICAL: Starting consulting practice May 2025.
-
-## This Month
-[6] User prefers Python for scripting, TypeScript for web.
-
-## Historical
-[5] User has been coding for 15 years, started with PHP.
+Eli is a software engineer based in Austin who relocated there in May 2025.
+He is starting a consulting practice focused on AI. He has been coding for
+15 years, starting with PHP, and now prefers Python for scripting and
+TypeScript for web projects.
 ```
+
+The synthesized content:
+- Deduplicates repeated facts
+- Uses newer details over older ones
+- Preserves important historical context
+- Written in third-person narrative prose
 
 ### Caching
 
@@ -384,19 +400,20 @@ LLM integration for observation extraction.
 ### `summarize.py`
 Summarization pipeline.
 
-- `SPAN` - Base time unit (1 day)
-- `STEP` - Items per summary (3)
+- `STEP` - Items per summary (10)
 - `assign_models_to_observations(session, observations)` - Model assignment
-- `summarize_observations(observations)` - Tier 0 summarization
-- `summarize_summaries(summaries)` - Higher tier summarization
-- `run_tier0_summarization(on_progress, max_workers)` - Run tier 0
-- `run_higher_tier_summarization(on_progress, max_workers)` - Run tiers 1+
-- `run_all_summarization(on_progress)` - Run complete pipeline
+- `summarize_observations(observations, model_name, model_description)` - Tier 0 summarization
+- `summarize_summaries(summaries, model_name, model_description)` - Higher tier summarization
+- `run_tier0_summarization(on_progress, max_workers, max_obs)` - Run tier 0
+- `run_higher_tier_summarization(on_progress, max_workers, max_tier)` - Run tiers 1+
+- `run_all_summarization(on_progress, max_workers, max_tier, max_obs)` - Run complete pipeline
 
 ### `pyramid.py`
-Pyramid retrieval.
+Pyramid retrieval and synthesis.
 
 - `get_pyramid(session, model_id)` - Returns dict of tier → summaries
+- `get_unsummarized_observations(session, model_id, by_tier)` - Get observations not yet in tier 0
+- `synthesize_model(name, description, by_tier, unsummarized_obs)` - Generate coherent mental model narrative
 
 ### `embeddings.py`
 Vector embedding utilities.
@@ -405,16 +422,20 @@ Vector embedding utilities.
 - `EMBEDDING_DIM` - Dimension count (1536)
 - `get_embedding(text)` - Generate embedding
 - `serialize_embedding(embedding)` - Convert to bytes
+- `deserialize_embedding(blob)` - Convert bytes to list
 - `enable_vec(conn)` - Load sqlite-vec extension
+- `create_vec_table(conn, table_name, dim)` - Create virtual table
 - `search_similar(conn, table_name, query_embedding, limit)` - Vector search
 
 ### `export_models.py`
-Markdown export.
+Markdown export with synthesis.
 
 - `CORE_MODEL_FILES` - Mapping of base models to filenames
-- `render_model_markdown(session, model)` - Generate markdown for model
+- `TIER_LABELS` - Display labels for tiers
+- `derive_model_purpose(session, model)` - Generate description from observations
+- `update_model_descriptions(session)` - Fill in missing descriptions
 - `render_memory_index(core_models, other_models)` - Generate index
-- `export_models(workspace, db_path, force)` - Main export function
+- `export_models(workspace, db_path, force, debug, do_synthesize, on_progress)` - Main export function
 
 ## Processing Flow
 
@@ -428,8 +449,8 @@ Source DB → chunk_messages → process_chunk (parallel) → observations
 ### Summarization Flow
 ```
 Unassigned observations → assign_model calls → model assignment
-Observations by (day, model) → summarize_observations → Tier 0 summaries
-Tier N summaries (groups of 3) → summarize_summaries → Tier N+1 summaries
+Observations (groups of 10) → summarize_observations → Tier 0 summaries
+Tier N summaries (groups of 10) → summarize_summaries → Tier N+1 summaries
 ```
 
 ### Search Flow
@@ -440,8 +461,8 @@ Query → get_embedding → memory_vec MATCH → ranked results
 
 ### Export Flow
 ```
-Models → update_model_descriptions → render_model_markdown
-      → write_if_changed (with cache) → markdown files
+Models → update_model_descriptions → get_pyramid + get_unsummarized_observations
+      → synthesize_model (parallel) → write_if_changed → markdown files
 ```
 
 ## Configuration
@@ -459,8 +480,7 @@ MAX_TOKENS = 10000
 CHARS_PER_TOKEN = 4
 
 # summarize.py
-SPAN = timedelta(days=1)
-STEP = 3
+STEP = 10
 
 # embeddings.py
 EMBEDDING_MODEL = "text-embedding-3-small"
