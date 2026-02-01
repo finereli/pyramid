@@ -16,20 +16,16 @@ OBSERVE_TOOL = {
     "type": "function",
     "function": {
         "name": "add_observation",
-        "description": "Record an observation about the conversation. Write in first person from the agent's perspective.",
+        "description": "Record an observation about the conversation",
         "parameters": {
             "type": "object",
             "properties": {
                 "text": {
                     "type": "string",
-                    "description": "The observation text, a single sentence in first person"
-                },
-                "importance": {
-                    "type": "integer",
-                    "description": "Importance 1-10. 1=trivial, 5=normal, 7=notable, 10=critical"
+                    "description": "The observation text, a single factual sentence"
                 }
             },
-            "required": ["text", "importance"]
+            "required": ["text"]
         }
     }
 }
@@ -44,9 +40,7 @@ GOOD: "User's son Tom is 8 years old"
 BAD: "We discussed their preferences"  
 GOOD: "User prefers dark mode in all apps"
 
-Write in first person. Include names, places, dates, numbers, preferences.
-
-Importance: 1-3 trivial, 4-6 useful, 7-8 notable, 9-10 critical."""
+Include names, places, dates, numbers, preferences. Each observation should be a single factual sentence."""
 
 
 def estimate_tokens(text):

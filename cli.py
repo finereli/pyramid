@@ -16,13 +16,12 @@ def cli():
 
 @cli.command()
 @click.argument('text')
-@click.option('--importance', '-i', default=5, help='Importance 1-10+')
-def observe(text, importance):
+def observe(text):
     session = get_session()
-    obs = Observation(text=text, importance=importance, timestamp=datetime.now(UTC))
+    obs = Observation(text=text, timestamp=datetime.now(UTC))
     session.add(obs)
     session.commit()
-    click.echo(f'Added observation #{obs.id} (importance={importance})')
+    click.echo(f'Added observation #{obs.id}')
     session.close()
 
 
@@ -38,7 +37,7 @@ def list_observations(limit):
     
     for obs in reversed(observations):
         model_name = obs.model.name if obs.model else '-'
-        click.echo(f'[{obs.id}] {obs.timestamp:%Y-%m-%d %H:%M} ({obs.importance}) [{model_name}] {obs.text}')
+        click.echo(f'[{obs.id}] {obs.timestamp:%Y-%m-%d %H:%M} [{model_name}] {obs.text}')
     
     session.close()
 
@@ -122,7 +121,6 @@ def bootstrap(source, limit, conversation, parallel, no_summarize):
                 ts = datetime.fromisoformat(ts)
             obs = Observation(
                 text=obs_data['text'],
-                importance=obs_data['importance'],
                 timestamp=ts or datetime.now(UTC)
             )
             session.add(obs)
@@ -148,22 +146,27 @@ def bootstrap(source, limit, conversation, parallel, no_summarize):
 
 
 @cli.command()
-@click.option('--tier', '-t', default=None, type=int, help='Run only specific tier (0 for observations, omit for all)')
-def summarize(tier):
-    progress = lambda msg: click.echo(f'  {msg}')
+@click.option('--max-obs', '-n', default=None, type=int, help='Maximum observations to process (for testing)')
+@click.option('--max-tier', '-T', default=None, type=int, help='Maximum tier to build (e.g., 1 = only tier 0 and 1)')
+@click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers')
+@click.option('--clean', is_flag=True, help='Delete all existing summaries and model assignments before running')
+def summarize(max_obs, max_tier, parallel, clean):
+    session = get_session()
     
-    if tier == 0:
-        click.echo('Running tier 0 summarization...')
-        created = run_tier0_summarization(on_progress=progress)
-        click.echo(f'Created {created} tier 0 summaries')
-    elif tier is not None:
-        click.echo(f'Running tier {tier} summarization...')
-        created = run_higher_tier_summarization(on_progress=progress)
-        click.echo(f'Created {created} higher tier summaries')
-    else:
-        click.echo('Running full summarization...')
-        tier0, higher = run_all_summarization(on_progress=progress)
-        click.echo(f'Created {tier0} tier 0 + {higher} higher tier summaries')
+    if clean:
+        deleted_summaries = session.query(Summary).delete()
+        session.query(Observation).update({Observation.model_id: None})
+        deleted_models = session.query(Model).filter(Model.is_base == False).delete()
+        session.commit()
+        click.echo(f'Cleaned: {deleted_summaries} summaries, {deleted_models} non-base models, reset assignments')
+    
+    session.close()
+    
+    progress = lambda msg: click.echo(msg)
+    
+    click.echo('Running summarization...')
+    tier0, higher = run_all_summarization(on_progress=progress, max_workers=parallel, max_tier=max_tier, max_obs=max_obs)
+    click.echo(f'Created {tier0} tier 0 + {higher} higher tier summaries')
 
 
 @cli.command()

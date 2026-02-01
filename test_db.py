@@ -25,7 +25,7 @@ def test_base_models_created(session):
 
 
 def test_add_observation_without_model(session):
-    obs = Observation(text='Test observation', importance=5, timestamp=datetime.now(UTC))
+    obs = Observation(text='Test observation', timestamp=datetime.now(UTC))
     session.add(obs)
     session.commit()
     
@@ -36,19 +36,11 @@ def test_add_observation_without_model(session):
 
 def test_add_observation_with_model(session):
     model = session.query(Model).filter_by(name='self').first()
-    obs = Observation(text='I learned something new', importance=7, model_id=model.id, timestamp=datetime.now(UTC))
+    obs = Observation(text='I learned something new', model_id=model.id, timestamp=datetime.now(UTC))
     session.add(obs)
     session.commit()
     
     assert obs.model.name == 'self'
-
-
-def test_observation_importance_default(session):
-    obs = Observation(text='Default importance', timestamp=datetime.now(UTC))
-    session.add(obs)
-    session.commit()
-    
-    assert obs.importance == 5
 
 
 def test_create_custom_model(session):
@@ -62,8 +54,8 @@ def test_create_custom_model(session):
 
 def test_model_has_observations(session):
     model = session.query(Model).filter_by(name='user').first()
-    obs1 = Observation(text='Eli asked for help', importance=5, model_id=model.id, timestamp=datetime.now(UTC))
-    obs2 = Observation(text='Eli prefers simple code', importance=6, model_id=model.id, timestamp=datetime.now(UTC))
+    obs1 = Observation(text='Eli asked for help', model_id=model.id, timestamp=datetime.now(UTC))
+    obs2 = Observation(text='Eli prefers simple code', model_id=model.id, timestamp=datetime.now(UTC))
     session.add_all([obs1, obs2])
     session.commit()
     

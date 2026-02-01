@@ -1,21 +1,18 @@
 import json
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from sqlalchemy import func
 from db import get_session, Observation, Summary, Model, BASE_MODELS
 from llm import client, MODEL, MAX_TOKENS, CHARS_PER_TOKEN, estimate_tokens
 
-SPAN = timedelta(days=1)
-STEP = 3
+STEP = 10
 
-SUMMARIZE_SYSTEM_PROMPT = """You are a memory agent creating summaries. Write telegram-style: short, dense sentences.
+SUMMARIZE_SYSTEM_PROMPT = """You are a memory agent creating summaries.
 
-OUTPUT FORMAT:
-- Each line starts with [N] where N is importance (1-10)
-- Use IMPORTANT:/CRITICAL:/ESSENTIAL: inline to emphasize key facts within a line
-- Example: "[7] User relocated to Austin. CRITICAL: Starting consulting practice May 2025."
-- Example: "[5] Family: spouse Sam 38, daughter Mia 7."
+Write in clear, readable narrative prose. Convey importance through word choice 
+(e.g., "significantly", "notably", "critically") rather than markers or scores.
 
-Preserve specific facts: names, dates, numbers, places."""
+Preserve specific facts: names, dates, numbers, places.
+Organize related information into coherent paragraphs."""
 
 ASSIGN_MODEL_TOOL = {
     "type": "function", 
@@ -34,82 +31,98 @@ ASSIGN_MODEL_TOOL = {
 }
 
 
-def get_models_context(session):
+def get_models_context(session, include_samples=True):
     models = session.query(Model).all()
     lines = ["Available models:"]
     for m in models:
-        lines.append(f"- {m.name}: {m.description or '(no description)'}")
+        lines.append(f"\n### {m.name}")
+        lines.append(f"Purpose: {m.description or '(undefined)'}")
+        
+        if include_samples:
+            samples = session.query(Observation).filter(
+                Observation.model_id == m.id
+            ).order_by(Observation.timestamp.desc()).limit(5).all()
+            
+            if samples:
+                lines.append("Examples:")
+                for s in samples:
+                    lines.append(f"  - {s.text}")
+    
     return "\n".join(lines)
 
 
-def assign_models_to_observations(session, observations):
+def assign_models_to_observations(session, observations, on_progress=None):
     if not observations:
         return
     
-    models_context = get_models_context(session)
-    
-    obs_text = "\n".join(f"[{obs.id}] {obs.text}" for obs in observations)
-    
-    prompt = f"""{models_context}
-
-Assign each observation to the most appropriate model. Create new models for distinct entities (people, projects, companies) that have multiple observations.
-
-Observations:
-{obs_text}"""
-
     system_prompt = """You assign observations to mental models. Call assign_model for each observation.
 
-Base models (use these when appropriate):
-- self: Agent capabilities, preferences, tools used, learnings about being an assistant
-- user: Primary user identity, preferences, personal life events, general user info
-- system: Technical environment, configurations, software setup, tools
+Base models:
+- self: The agent's own experience as an independent conscious entity - its observations, reflections, insights, preferences, and evolving understanding of itself and its role. NOT about the user's personal growth.
+- user: Information about the primary human user - their identity, biography, family, preferences, projects, goals, philosophy, and life circumstances.
+- system: The technical environment and tools - configurations, capabilities, integrations, and operational details.
 
-Create new models for distinct entities (specific people, projects, companies, topics) that warrant separate tracking."""
+Create new models for distinct entities (specific people, projects, topics) only when you see 
+multiple observations about them in the current batch. If an observation doesn't fit well 
+anywhere, you may leave it unassigned by not calling assign_model for it."""
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        tools=[ASSIGN_MODEL_TOOL],
-        tool_choice="required"
-    )
+    for i in range(0, len(observations), STEP):
+        batch = observations[i:i + STEP]
+        
+        models_context = get_models_context(session, include_samples=True)
+        obs_text = "\n".join(f"[{obs.id}] {obs.text}" for obs in batch)
+        
+        prompt = f"""{models_context}
+
+Assign each observation to the most appropriate model based on the examples shown.
+
+Observations to assign:
+{obs_text}"""
+
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            tools=[ASSIGN_MODEL_TOOL],
+            tool_choice="auto"
+        )
+        
+        for tool_call in response.choices[0].message.tool_calls or []:
+            if tool_call.function.name == "assign_model":
+                args = json.loads(tool_call.function.arguments)
+                obs_id = args['observation_id']
+                model_name = args['model_name'].lower().strip().replace(' ', '-')
+                
+                model = session.query(Model).filter_by(name=model_name).first()
+                if not model:
+                    model = Model(name=model_name, is_base=False)
+                    session.add(model)
+                    session.flush()
+                
+                obs = session.query(Observation).get(obs_id)
+                if obs:
+                    obs.model_id = model.id
+        
+        session.commit()
+        
+        if on_progress:
+            on_progress(f"  Assigned batch {i//STEP + 1}/{(len(observations) + STEP - 1)//STEP}")
+
+
+def get_observations_by_model(session):
+    observations = session.query(Observation).filter(
+        Observation.model_id != None
+    ).order_by(Observation.timestamp).all()
     
-    for tool_call in response.choices[0].message.tool_calls or []:
-        if tool_call.function.name == "assign_model":
-            args = json.loads(tool_call.function.arguments)
-            obs_id = args['observation_id']
-            model_name = args['model_name'].lower().strip().replace(' ', '-')
-            
-            model = session.query(Model).filter_by(name=model_name).first()
-            if not model:
-                model = Model(name=model_name, is_base=False)
-                session.add(model)
-                session.flush()
-            
-            obs = session.query(Observation).get(obs_id)
-            if obs:
-                obs.model_id = model.id
-    
-    session.commit()
-
-
-def get_day_start(dt):
-    return dt.replace(hour=0, minute=0, second=0, microsecond=0)
-
-
-def get_observations_by_day(session):
-    observations = session.query(Observation).order_by(Observation.timestamp).all()
-    
-    by_day = {}
+    by_model = {}
     for obs in observations:
-        day = get_day_start(obs.timestamp)
-        if day not in by_day:
-            by_day[day] = []
-        by_day[day].append(obs)
+        if obs.model_id not in by_model:
+            by_model[obs.model_id] = []
+        by_model[obs.model_id].append(obs)
     
-    return by_day
+    return by_model
 
 
 def chunk_observations(observations, max_tokens=MAX_TOKENS):
@@ -132,101 +145,117 @@ def chunk_observations(observations, max_tokens=MAX_TOKENS):
     return chunks
 
 
-def summarize_observations(observations):
+def summarize_observations(observations, model_name, model_description):
     chunks = chunk_observations(observations)
     
     if len(chunks) == 1:
-        return summarize_chunk(chunks[0])
+        return summarize_chunk(chunks[0], model_name, model_description)
     
-    chunk_summaries = [summarize_chunk(chunk) for chunk in chunks]
-    combined = "\n".join(chunk_summaries)
+    chunk_summaries = [summarize_chunk(chunk, model_name, model_description) for chunk in chunks]
+    combined = "\n\n---\n\n".join(chunk_summaries)
     
+    system = f"""{SUMMARIZE_SYSTEM_PROMPT}
+
+Model: {model_name}
+Purpose: {model_description}
+
+Combine the following partial summaries into one coherent narrative."""
+
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Combine these summaries into one. Keep the [N] importance format:\n\n{combined}"}
+            {"role": "system", "content": system},
+            {"role": "user", "content": combined}
         ]
     )
     return response.choices[0].message.content
 
 
-def summarize_chunk(observations):
-    obs_text = "\n".join(f"[{obs.importance}] {obs.text}" for obs in observations)
+def summarize_chunk(observations, model_name, model_description):
+    obs_text = "\n".join(f"- {obs.text}" for obs in observations)
     
+    system = f"""{SUMMARIZE_SYSTEM_PROMPT}
+
+Model: {model_name}
+Purpose: {model_description}
+
+Only include information relevant to this model's purpose. If an observation seems misplaced, you may omit it."""
+
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Summarize these observations. Each has [importance] prefix (1-10 scale). Preserve importance in output using same [N] format:\n\n{obs_text}"}
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Summarize these observations:\n\n{obs_text}"}
         ]
     )
     return response.choices[0].message.content
 
 
-def summarize_summaries(summaries):
-    text = "\n---\n".join(s.text for s in summaries)
+def summarize_summaries(summaries, model_name, model_description):
+    text = "\n\n---\n\n".join(s.text for s in summaries)
     
+    system = f"""{SUMMARIZE_SYSTEM_PROMPT}
+
+Model: {model_name}
+Purpose: {model_description}
+
+Combine these summaries into one higher-level narrative, preserving key facts and themes."""
+
     response = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT + "\n\nPreserve [N] importance prefixes and IMPORTANT/CRITICAL/ESSENTIAL markers from source summaries."},
-            {"role": "user", "content": f"Combine these summaries into one higher-level summary. Keep the [N] importance format:\n\n{text}"}
+            {"role": "system", "content": system},
+            {"role": "user", "content": text}
         ]
     )
     return response.choices[0].message.content
 
 
-def run_tier0_summarization(on_progress=None, max_workers=10):
+def run_tier0_summarization(on_progress=None, max_workers=10, max_obs=None):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
     session = get_session()
     
-    unassigned = session.query(Observation).filter(Observation.model_id == None).all()
+    unassigned = session.query(Observation).filter(Observation.model_id == None).order_by(Observation.timestamp).all()
     if unassigned:
+        if max_obs:
+            unassigned = unassigned[:max_obs]
         if on_progress:
             on_progress(f"Assigning {len(unassigned)} observations to models...")
-        assign_models_to_observations(session, unassigned)
+        assign_models_to_observations(session, unassigned, on_progress)
     
-    by_day = get_observations_by_day(session)
+    by_model = get_observations_by_model(session)
     
     tasks = []
-    for day, observations in sorted(by_day.items()):
-        by_model = {}
-        for obs in observations:
-            model_id = obs.model_id
-            if model_id not in by_model:
-                by_model[model_id] = []
-            by_model[model_id].append(obs)
+    for model_id, observations in by_model.items():
+        model = session.query(Model).get(model_id)
         
-        for model_id, model_obs in by_model.items():
-            if model_id is None:
-                continue
+        existing_count = session.query(Summary).filter(
+            Summary.tier == 0,
+            Summary.model_id == model_id
+        ).count()
+        
+        summarized_obs_count = existing_count * STEP
+        unsummarized = observations[summarized_obs_count:]
+        
+        for i in range(0, len(unsummarized) - STEP + 1, STEP):
+            chunk = unsummarized[i:i + STEP]
+            start_ts = chunk[0].timestamp
+            end_ts = chunk[-1].timestamp
             
-            existing = session.query(Summary).filter(
-                Summary.tier == 0,
-                Summary.model_id == model_id,
-                Summary.start_timestamp == day,
-                Summary.end_timestamp == day + SPAN
-            ).first()
-            
-            if existing:
-                continue
-            
-            model = session.query(Model).get(model_id)
-            tasks.append((day, model_id, model.name, model_obs))
+            tasks.append((model_id, model.name, model.description, chunk, start_ts, end_ts))
     
     if not tasks:
         session.close()
         return 0
     
     if on_progress:
-        on_progress(f"Summarizing {len(tasks)} day/model combinations...")
+        on_progress(f"Creating {len(tasks)} tier 0 summaries...")
     
     def process_task(task):
-        day, model_id, model_name, model_obs = task
-        summary_text = summarize_observations(model_obs)
-        return (day, model_id, summary_text)
+        model_id, model_name, model_desc, obs_chunk, start_ts, end_ts = task
+        summary_text = summarize_observations(obs_chunk, model_name, model_desc or '')
+        return (model_id, summary_text, start_ts, end_ts)
     
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -236,13 +265,13 @@ def run_tier0_summarization(on_progress=None, max_workers=10):
             if on_progress:
                 on_progress(f"  [{i}/{len(tasks)}] completed")
     
-    for day, model_id, summary_text in results:
+    for model_id, summary_text, start_ts, end_ts in results:
         summary = Summary(
             model_id=model_id,
             tier=0,
             text=summary_text,
-            start_timestamp=day,
-            end_timestamp=day + SPAN
+            start_timestamp=start_ts,
+            end_timestamp=end_ts
         )
         session.add(summary)
     
@@ -251,7 +280,7 @@ def run_tier0_summarization(on_progress=None, max_workers=10):
     return len(results)
 
 
-def run_higher_tier_summarization(on_progress=None, max_workers=10):
+def run_higher_tier_summarization(on_progress=None, max_workers=10, max_tier=None):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
     session = get_session()
@@ -261,6 +290,9 @@ def run_higher_tier_summarization(on_progress=None, max_workers=10):
     tier = 0
     
     while True:
+        if max_tier is not None and tier >= max_tier:
+            break
+            
         tasks = []
         
         for model in models:
@@ -298,8 +330,7 @@ def run_higher_tier_summarization(on_progress=None, max_workers=10):
                 if existing:
                     continue
                 
-                chunk_texts = [s.text for s in chunk]
-                tasks.append((model.id, model.name, tier + 1, start_ts, end_ts, chunk_texts))
+                tasks.append((model.id, model.name, model.description, tier + 1, start_ts, end_ts, chunk))
         
         if not tasks:
             break
@@ -308,14 +339,8 @@ def run_higher_tier_summarization(on_progress=None, max_workers=10):
             on_progress(f"T{tier + 1}: {len(tasks)} summaries across models...")
         
         def process_task(task):
-            model_id, model_name, new_tier, start_ts, end_ts, chunk_texts = task
-            
-            class FakeSummary:
-                def __init__(self, text):
-                    self.text = text
-            
-            fake_summaries = [FakeSummary(t) for t in chunk_texts]
-            summary_text = summarize_summaries(fake_summaries)
+            model_id, model_name, model_desc, new_tier, start_ts, end_ts, chunk = task
+            summary_text = summarize_summaries(chunk, model_name, model_desc or '')
             return (model_id, new_tier, start_ts, end_ts, summary_text)
         
         results = []
@@ -344,7 +369,7 @@ def run_higher_tier_summarization(on_progress=None, max_workers=10):
     return total_created
 
 
-def run_all_summarization(on_progress=None):
-    tier0_count = run_tier0_summarization(on_progress)
-    higher_count = run_higher_tier_summarization(on_progress)
+def run_all_summarization(on_progress=None, max_workers=10, max_tier=None, max_obs=None):
+    tier0_count = run_tier0_summarization(on_progress, max_workers=max_workers, max_obs=max_obs)
+    higher_count = run_higher_tier_summarization(on_progress, max_workers=max_workers, max_tier=max_tier)
     return tier0_count, higher_count

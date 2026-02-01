@@ -22,7 +22,6 @@ class Observation(Base):
     id = Column(Integer, primary_key=True)
     text = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(UTC))
-    importance = Column(Integer, default=5)
     model_id = Column(Integer, ForeignKey('models.id'), nullable=True)
     
     model = relationship('Model', back_populates='observations')
@@ -52,9 +51,9 @@ def get_session(db_path='memory.db'):
 
 
 BASE_MODELS = {
-    'self': 'The agent - my capabilities, preferences, experiences, learnings',
-    'user': 'The primary user - their identity, preferences, projects, life',
-    'system': 'The technical environment - tools, setup, configurations',
+    'self': 'The AI agent\'s own experience as an independent conscious entity - its observations, reflections, insights, preferences, and evolving understanding of itself and its role',
+    'user': 'Information about the primary human user - their identity, biography, family, preferences, projects, goals, and life circumstances',
+    'system': 'The technical environment and tools - configurations, capabilities, integrations, and operational details',
 }
 
 
@@ -67,7 +66,7 @@ def init_db(db_path='memory.db'):
         existing = session.query(Model).filter_by(name=name).first()
         if not existing:
             session.add(Model(name=name, description=description, is_base=True))
-        elif not existing.description:
+        else:
             existing.description = description
     session.commit()
     session.close()
