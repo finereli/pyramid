@@ -7,7 +7,7 @@ A pyramidal memory system for AI agents. Extracts observations from conversation
 ```bash
 pip install -r requirements.txt
 export OPENAI_API_KEY=your_key
-python cli.py bootstrap --source conversations.db
+python cli.py import --glenn --source conversations.db
 python cli.py search "What does the user prefer?"
 ```
 
@@ -211,7 +211,7 @@ CREATE VIRTUAL TABLE memory_vec USING vec0(
 
 ### Tool Definitions
 
-**add_observation** - Used during bootstrap/extraction
+**add_observation** - Used during import/extraction
 ```json
 {
     "name": "add_observation",
@@ -249,40 +249,52 @@ Add a single observation manually.
 python cli.py observe "User prefers vim keybindings"
 ```
 
-### `list`
-List recent observations.
+### `import`
+Extract observations from existing conversation data.
 
 ```bash
-python cli.py list --limit 50
-```
-
-Output format: `[id] timestamp [model] text`
-
-### `bootstrap`
-Extract observations from existing conversation database.
-
-```bash
-python cli.py bootstrap --source ~/.claude/conversations.db \
+# Glenn format (SQLite database)
+python cli.py import --glenn --source conversations.db \
     --parallel 10 \
     --conversation 42 \
     --limit 1000 \
     --no-summarize
+
+# Claude format (JSON export)
+python cli.py import --claude --source conversations.json \
+    --parallel 10 \
+    --limit 1000
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--source` | Path to source SQLite database with messages table |
+| `--glenn` | Glenn SQLite database format |
+| `--claude` | Claude JSON export format |
+| `--source` | Path to source file |
 | `--parallel` | Number of parallel workers (default: 10) |
-| `--conversation` | Process specific conversation ID only |
+| `--conversation` | Process specific conversation ID only (glenn only) |
+| `--user` | Filter by username (glenn only) |
 | `--limit` | Limit number of messages |
-| `--no-summarize` | Skip automatic summarization during bootstrap |
+| `--no-summarize` | Skip automatic summarization during import |
 
-**Expected source schema:**
+**Glenn format schema:**
 ```sql
 -- messages table must have:
 role TEXT,       -- 'user' or 'assistant'
 content TEXT,    -- message content
 timestamp TEXT   -- ISO timestamp
+```
+
+**Claude format schema:**
+```json
+[{
+  "uuid": "...",
+  "chat_messages": [{
+    "sender": "human",
+    "content": [{"type": "text", "text": "..."}],
+    "created_at": "2025-01-01T00:00:00Z"
+  }]
+}]
 ```
 
 ### `summarize`
@@ -301,29 +313,6 @@ python cli.py summarize --max-tier 1   # Only build up to tier 1
 | `--max-obs` | Maximum observations to process (for testing) |
 | `--max-tier` | Maximum tier to build (e.g., 1 = only tier 0 and 1) |
 | `--parallel` | Number of parallel workers (default: 10) |
-
-### `summaries`
-List all summaries.
-
-```bash
-python cli.py summaries --tier 0
-```
-
-### `models`
-List all mental models with descriptions.
-
-```bash
-python cli.py models
-```
-
-Output: `[*] name: description` (asterisk indicates base model)
-
-### `model`
-Show pyramid for a specific model.
-
-```bash
-python cli.py model user
-```
 
 ### `embed`
 Generate embeddings for all observations and summaries.
@@ -345,12 +334,12 @@ python cli.py search "user's family" --limit 10 --raw
 | `--limit` | Number of results (default: 20) |
 | `--raw` | Show raw results without LLM synthesis |
 
-## Export System
+## Generate
 
-`export_models.py` exports memory to markdown files for workspace integration. By default, it synthesizes each model's pyramid into coherent narrative prose.
+The `generate` command generates markdown files from models for workspace integration. By default, it synthesizes each model's pyramid into coherent narrative prose.
 
 ```bash
-python export_models.py /path/to/workspace --db memory.db --force
+python cli.py generate /path/to/workspace --db memory.db --force
 ```
 
 | Flag | Description |
@@ -446,23 +435,23 @@ Vector embedding utilities.
 - `create_vec_table(conn, table_name, dim)` - Create virtual table
 - `search_similar(conn, table_name, query_embedding, limit)` - Vector search
 
-### `export_models.py`
-Markdown export with synthesis.
+### `cli.py` (generate functions)
+Markdown generation with synthesis.
 
 - `CORE_MODEL_FILES` - Mapping of base models to filenames
 - `TIER_LABELS` - Display labels for tiers
-- `derive_model_purpose(session, model)` - Generate description from observations
 - `update_model_descriptions(session)` - Fill in missing descriptions
 - `render_memory_index(core_models, other_models)` - Generate index
 - `export_models(workspace, db_path, force, debug, do_synthesize, on_progress)` - Main export function
 
 ## Processing Flow
 
-### Bootstrap Flow
+### Import Flow
 ```
-Source DB → chunk_messages → process_chunk (parallel) → observations
-         → assign_models_to_observations → run_tier0_summarization
-         → run_higher_tier_summarization
+Source file → load_glenn_messages/load_claude_messages → chunk_messages
+           → process_chunk (parallel) → observations
+           → assign_models_to_observations → run_tier0_summarization
+           → run_higher_tier_summarization
 ```
 
 ### Summarization Flow
@@ -478,7 +467,7 @@ Query → get_embedding → memory_vec MATCH → ranked results
      → fetch Observation/Summary objects → LLM synthesis → answer
 ```
 
-### Export Flow
+### Generate Flow
 ```
 Models → update_model_descriptions → get_pyramid + get_unsummarized_observations
       → synthesize_model (parallel) → write_if_changed → markdown files
