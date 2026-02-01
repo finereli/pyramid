@@ -142,6 +142,8 @@ def export_models(workspace, db_path='memory.db', force=False, debug=False, do_s
     
     models = session.query(Model).all()
     
+    global_ref_date = session.query(func.max(Observation.timestamp)).scalar()
+    
     model_data = []
     for model in models:
         by_tier = get_pyramid(session, model.id)
@@ -155,9 +157,12 @@ def export_models(workspace, db_path='memory.db', force=False, debug=False, do_s
         model_data.append({
             'name': model.name,
             'description': model.description,
-            'by_tier': by_tier,
-            'unsummarized': unsummarized,
+            'by_tier': {tier: [{'text': s.text, 'end_timestamp': s.end_timestamp} for s in sums] 
+                        for tier, sums in by_tier.items()},
+            'unsummarized': [o.text for o in unsummarized],
+            'unsummarized_ts': [o.timestamp for o in unsummarized],
             'filename': filename,
+            'ref_date': global_ref_date,
         })
     
     session.close()
@@ -165,9 +170,13 @@ def export_models(workspace, db_path='memory.db', force=False, debug=False, do_s
     def render_one(data):
         by_tier = data['by_tier']
         unsummarized = data['unsummarized']
+        unsummarized_ts = data.get('unsummarized_ts', [])
+        ref_date = data.get('ref_date')
+        
+        unsummarized_with_ts = list(zip(unsummarized, unsummarized_ts)) if unsummarized_ts else [(t, ref_date) for t in unsummarized]
         
         if do_synthesize and (by_tier or unsummarized) and not debug:
-            synthesized = synthesize_model(data['name'], data['description'], by_tier, unsummarized)
+            synthesized = synthesize_model(data['name'], data['description'], by_tier, unsummarized_with_ts, ref_date)
             if synthesized:
                 lines = [
                     '---',
@@ -198,16 +207,16 @@ def export_models(workspace, db_path='memory.db', force=False, debug=False, do_s
             lines.append('')
             for s in by_tier[tier]:
                 if debug:
-                    lines.append(f'### T{tier} #{s.id} ({s.start_timestamp:%Y-%m-%d} to {s.end_timestamp:%Y-%m-%d})')
+                    lines.append(f'### T{tier} ({s["end_timestamp"]:%Y-%m-%d})')
                     lines.append('')
-                lines.append(s.text)
+                lines.append(s['text'])
                 lines.append('')
         
         if unsummarized:
             lines.append('## Unsummarized')
             lines.append('')
-            for o in unsummarized:
-                lines.append(f'- {o.text}')
+            for text in unsummarized:
+                lines.append(f'- {text}')
             lines.append('')
         
         return '\n'.join(lines)
