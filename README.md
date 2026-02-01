@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (self, user, system, topics), compresses them into tiered summaries, and synthesizes coherent narratives. Query via semantic search or export to markdown files.
+A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (self, user, system, topics), compresses them into tiered summaries, and synthesizes coherent narratives. Query via semantic search or export to markdown files for full context loading in OpenClaw type agents.
 
 ```bash
 pip install -r requirements.txt
@@ -124,10 +124,29 @@ This structure ensures:
 
 ### Model Synthesis
 
-When exporting to markdown, the pyramid and any unsummarized observations are synthesized into a coherent mental model:
-- Newer details override older ones (e.g., if age changes, use the most recent)
-- Duplicate facts are mentioned only once
-- Important historical context is preserved
+When exporting to markdown for OpenClaw agents, the pyramid and any unsummarized observations are synthesized into a coherent mental model organized by **temporal sections**:
+
+| Section | Time Range |
+|---------|------------|
+| Last 3 Days | Within 72 hours |
+| This Week | 3-7 days ago |
+| This Month | 7-30 days ago |
+| This Quarter | 30-90 days ago |
+| This Year | 90-365 days ago |
+| Earlier | More than a year ago |
+
+**Why temporal organization?** Three reasons:
+
+1. **Natural compression gradient**: Recent content (< ~10 days) is often unsummarized observations at full granularity, while older content has been progressively compressed (tier 0 = 10 obs, tier 1 = 100 obs, tier 2 = 1000 obs).
+
+2. **Mirrors human memory**: People remember yesterday in vivid detail and last year in broad strokes. The temporal sections make this gradient explicit.
+
+3. **Conversational expectations**: It's jarring when an agent forcefully integrates a specific fact from months ago into a response. Users expect recent context to dominate, with historical details surfacing only when relevant. The temporal structure guides agents toward natural memory retrieval—recent events are prominent, older context provides background without intruding.
+
+**Synthesis rules:**
+- Newer details override older ones (e.g., if location changes, use most recent)
+- Duplicate facts are mentioned only once per section
+- Each section is self-contained to avoid cross-section repetition
 - Output is third-person narrative prose
 
 ## Database Schema
