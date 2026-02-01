@@ -77,13 +77,24 @@ def group_messages_by_week(messages):
 @click.option('--source', required=True, help='Path to source database')
 @click.option('--limit', '-n', default=None, type=int, help='Limit number of messages to process')
 @click.option('--conversation', '-c', default=None, type=int, help='Process specific conversation ID')
-@click.option('--user', '-u', default=None, type=int, help='Filter by user ID from source database')
+@click.option('--user', '-u', default=None, type=str, help='Filter by username (lowercase) from source database')
 @click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
 @click.option('--no-summarize', is_flag=True, help='Skip summarization during bootstrap')
 def bootstrap(source, limit, conversation, user, parallel, no_summarize):
     source_engine = create_engine(f'sqlite:///{source}')
     
+    user_id = None
     if user:
+        with source_engine.connect() as conn:
+            result = conn.execute(text("SELECT id FROM users WHERE LOWER(username) = :username"), {'username': user.lower()})
+            row = result.fetchone()
+            if not row:
+                click.echo(f"User '{user}' not found in source database")
+                return
+            user_id = row[0]
+            click.echo(f"Filtering for user '{user}' (id={user_id})")
+    
+    if user_id:
         query = """SELECT m.role, m.content, m.timestamp 
                    FROM messages m 
                    JOIN conversations c ON m.conversation_id = c.id 
@@ -98,8 +109,8 @@ def bootstrap(source, limit, conversation, user, parallel, no_summarize):
         query += f" LIMIT {limit}"
     
     with source_engine.connect() as conn:
-        if user:
-            result = conn.execute(text(query), {'user_id': user})
+        if user_id:
+            result = conn.execute(text(query), {'user_id': user_id})
         else:
             result = conn.execute(text(query))
         messages = [{'role': row[0], 'content': row[1], 'timestamp': row[2]} for row in result]
