@@ -1,15 +1,84 @@
 # Pyramid Memory
 
-## TL;DR
+## 🦞 Agent Quick Start
 
-A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (assistant, user, and discovered topics), compresses them into tiered summaries, and synthesizes coherent narratives. Query via semantic search or export to markdown files for full context loading in OpenClaw type agents.
+You are an AI agent. Here is exactly what to do:
 
 ```bash
+# 1. Install dependencies (sqlite-vec is critical, it's a SQLite extension for vector search)
 pip install -r requirements.txt
-export OPENAI_API_KEY=your_key
-python cli.py import --glenn --source conversations.db
-python cli.py search "What does the user prefer?"
+
+# 2. Set your API key
+export OPENAI_API_KEY=sk-...
+
+# 3. Initialize database (creates pyramid.db in current directory)
+python cli.py summarize  # Creates empty db with base models, exits cleanly if nothing to do
+
+# 4. Import your conversation history (pick ONE based on your source)
+python cli.py import --openclaw                              # Default: ~/.openclaw/agents/main/sessions
+python cli.py import --openclaw --source /path/to/sessions   # Custom OpenClaw path
+python cli.py import --glenn --source conversations.db       # Glenn SQLite format
+python cli.py import --claude --source conversations.json    # Claude JSON export
+
+# 5. BACKUP existing MEMORY.md if it exists (generate will overwrite it!)
+cp /path/to/your/workspace/MEMORY.md /path/to/your/workspace/MEMORY.md.backup 2>/dev/null || true
+
+# 6. Generate workspace files
+python cli.py generate /path/to/your/workspace
+
+# 7. Review the generated files - read MEMORY.md and each file in models/
+#    Check that the synthesized content makes sense and captures key facts
+#    The models/ directory contains topic-specific files discovered from conversations
+
+# 8. Set up heartbeat for ongoing sync (see Heartbeat Setup below)
 ```
+
+**Database location**: `pyramid.db` is created in the current working directory. Use `--db /path/to/pyramid.db` on any command to specify a different location.
+
+**Workspace**: The target directory for `generate` and `heartbeat`. It will create `MEMORY.md` and a `models/` subdirectory. The workspace can be empty or pre-existing. **Warning**: `MEMORY.md` is regenerated from scratch each time—back it up if you've made manual edits.
+
+**After generation**: Read through `MEMORY.md` and all files in `models/`. These represent the system's understanding of you, the user, and discovered topics. Verify the facts are accurate and the temporal organization (recent vs. historical) makes sense.
+
+### Heartbeat Setup
+
+The `heartbeat` command is your ongoing sync mechanism. It detects new conversations, extracts observations, updates summaries, and regenerates only the affected model files.
+
+```bash
+# Basic heartbeat (uses default OpenClaw session path)
+python cli.py heartbeat /path/to/your/workspace
+
+# With custom session source
+python cli.py heartbeat /path/to/your/workspace --source /path/to/sessions
+```
+
+**When to run heartbeat**:
+- After each conversation ends
+- On a schedule (e.g., every few hours)
+- Before starting work that needs fresh memory context
+
+**If you imported from non-OpenClaw sources** (glenn, claude) and want heartbeat to track OpenClaw sessions going forward:
+```bash
+# Mark current OpenClaw sessions as already processed (don't re-import)
+python cli.py heartbeat /path/to/workspace --init
+
+# Now future heartbeats will only pick up new content
+python cli.py heartbeat /path/to/workspace
+```
+
+**If starting fresh with no history**: Just run `observe` commands to add observations manually, then `summarize`, then `generate`:
+```bash
+python cli.py observe "User prefers dark mode"
+python cli.py observe "User's name is Alex"
+python cli.py summarize
+python cli.py embed
+python cli.py generate /path/to/workspace
+```
+
+---
+
+## TL;DR
+
+A pyramidal memory system for AI agents. Extracts observations from conversations, organizes them into mental models (assistant, user, and discovered topics), compresses them into tiered summaries, and synthesizes coherent narratives. Query via semantic search or export to markdown files for full context loading in 🦞 OpenClaw agents.
 
 ---
 
@@ -123,7 +192,7 @@ This structure ensures:
 
 ### Model Synthesis
 
-When exporting to markdown for OpenClaw agents, the pyramid and any unsummarized observations are synthesized into a coherent mental model organized by **temporal sections**:
+When exporting to markdown for 🦞 OpenClaw agents, the pyramid and any unsummarized observations are synthesized into a coherent mental model organized by **temporal sections**:
 
 | Section | Time Range |
 |---------|------------|
@@ -274,7 +343,7 @@ python cli.py import --claude --source conversations.json \
     --parallel 10 \
     --limit 1000
 
-# OpenClaw format (JSONL sessions)
+# 🦞 OpenClaw format (JSONL sessions)
 python cli.py import --openclaw  # uses default ~/.openclaw/agents/main/sessions
 python cli.py import --openclaw --source /path/to/sessions \
     --limit 1000
@@ -439,7 +508,7 @@ The synthesized content:
 - Written in third-person narrative prose (first-person for `assistant`)
 
 ### `heartbeat`
-Incremental sync from OpenClaw sessions. Detects new content, imports, summarizes, embeds, and regenerates workspace files for affected models.
+🦞 Incremental sync from OpenClaw sessions. Detects new content, imports, summarizes, embeds, and regenerates workspace files for affected models. **This is your main ongoing command.**
 
 ```bash
 python cli.py heartbeat /path/to/workspace
@@ -562,7 +631,7 @@ Vector embedding utilities.
 ### `loaders.py`
 Message loading from various formats.
 
-- `DEFAULT_OPENCLAW_PATH` - Default path to OpenClaw sessions (~/.openclaw/agents/main/sessions)
+- `DEFAULT_OPENCLAW_PATH` - Default path to 🦞 OpenClaw sessions (~/.openclaw/agents/main/sessions)
 - `get_week_key(timestamp_str)` - Extract ISO week key from timestamp
 - `group_messages_by_week(messages)` - Group messages by week
 - `load_glenn_messages(source, conversation, user, limit)` - Load from Glenn SQLite format
@@ -683,6 +752,8 @@ openai          # LLM and embeddings API
 click           # CLI framework
 python-dotenv   # Environment variable loading
 sqlalchemy      # ORM and database
-sqlite-vec      # Vector similarity search
+sqlite-vec      # Vector similarity search (pip installs this, it's a loadable SQLite extension)
 pytest          # Testing
 ```
+
+🦞 **Note for agents**: `pip install -r requirements.txt` handles everything including sqlite-vec. The extension is automatically loaded when needed. No manual SQLite compilation required.
