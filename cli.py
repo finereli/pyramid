@@ -240,9 +240,10 @@ def search(query, limit, raw, time_weight):
 @click.option('--db', default='memory.db', help='Path to database file')
 @click.option('--debug', is_flag=True, help='Include source info (tier, id, date range)')
 @click.option('--no-synthesize', is_flag=True, help='Skip LLM synthesis, just concatenate summaries')
-def generate(workspace, db, debug, no_synthesize):
+@click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
+def generate(workspace, db, debug, no_synthesize, parallel):
     progress = lambda msg: click.echo(msg)
-    export_models(workspace, db, debug, do_synthesize=not no_synthesize, on_progress=progress)
+    export_models(workspace, db, debug, do_synthesize=not no_synthesize, on_progress=progress, max_workers=parallel)
     click.echo('Done')
 
 

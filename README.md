@@ -378,6 +378,7 @@ python cli.py generate /path/to/workspace --db memory.db
 | `--db` | Path to database file (default: memory.db) |
 | `--debug` | Include source info (tier, id, date range) |
 | `--no-synthesize` | Skip LLM synthesis, just concatenate summaries |
+| `--parallel`, `-p` | Number of parallel workers for synthesis (default: 10) |
 
 ### Output Files
 

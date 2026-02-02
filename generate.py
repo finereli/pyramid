@@ -18,7 +18,7 @@ TIER_LABELS = {
 }
 
 
-def update_model_descriptions(session, on_progress=None):
+def update_model_descriptions(session, on_progress=None, max_workers=10):
     models = session.query(Model).filter(
         (Model.description == None) | (Model.description == '')
     ).filter(Model.is_base == False).all()
@@ -29,15 +29,18 @@ def update_model_descriptions(session, on_progress=None):
     if on_progress:
         on_progress(f"Deriving descriptions for {len(models)} models...")
     
-    def derive_one(model_id, model_name):
+    model_samples = {}
+    for model in models:
         samples = session.query(Observation).filter(
-            Observation.model_id == model_id
+            Observation.model_id == model.id
         ).order_by(func.random()).limit(10).all()
-        
+        model_samples[model.id] = [s.text for s in samples]
+    
+    def derive_one(model_id, model_name, samples):
         if not samples:
             return model_id, None
         
-        sample_text = "\n".join(f"- {s.text}" for s in samples)
+        sample_text = "\n".join(f"- {s}" for s in samples)
         
         response = client.chat.completions.create(
             model=MODEL,
@@ -60,8 +63,8 @@ Examples:
         return model_id, desc
     
     results = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(derive_one, m.id, m.name): m for m in models}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(derive_one, m.id, m.name, model_samples[m.id]): m for m in models}
         for i, future in enumerate(as_completed(futures), 1):
             model = futures[future]
             model_id, desc = future.result()
@@ -160,11 +163,11 @@ def render_model(data, do_synthesize=True, debug=False):
     return '\n'.join(lines)
 
 
-def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=True, on_progress=None):
+def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=True, on_progress=None, max_workers=10):
     workspace = Path(workspace)
     session = get_session(db_path)
     
-    update_model_descriptions(session, on_progress)
+    update_model_descriptions(session, on_progress, max_workers)
     
     models = session.query(Model).all()
     
@@ -201,7 +204,7 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
         if on_progress:
             on_progress(f"Synthesizing {len(model_data)} models...")
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(render_model, data, do_synthesize, debug): data for data in model_data}
             for i, future in enumerate(as_completed(futures), 1):
                 data = futures[future]
