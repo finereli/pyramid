@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 from db import init_db, get_session, Observation, Model, Summary
 from llm import extract_observations, client, MODEL
 from summarize import run_tier0_summarization, run_higher_tier_summarization, run_all_summarization
-from embeddings import embed_many, enable_vec, init_memory_vec, get_existing_embeddings, store_embeddings, search_memory
+from embeddings import embed_many, enable_vec, init_memory_vec, get_existing_embeddings, store_embeddings, search_memory, enrich_for_embedding
 from loaders import load_glenn_messages, load_claude_messages, group_messages_by_week
 from generate import export_models
 
@@ -135,21 +135,29 @@ def summarize(start, max_obs, max_tier, parallel, clean):
 
 @cli.command(help='Generate embeddings for semantic search.')
 @click.option('--parallel', '-p', default=10, help='Number of parallel workers for batch processing')
-def embed(parallel):
+@click.option('--force', is_flag=True, help='Clear existing embeddings and re-embed everything')
+def embed(parallel, force):
     session = get_session()
     conn = sqlite3.connect('memory.db')
     enable_vec(conn)
     init_memory_vec(conn)
+    
+    if force:
+        conn.execute("DELETE FROM memory_vec")
+        conn.commit()
+        click.echo('Cleared existing embeddings.')
     
     existing = get_existing_embeddings(conn)
     
     to_embed = []
     for obs in session.query(Observation).all():
         if ('observation', obs.id) not in existing and obs.text and obs.text.strip():
-            to_embed.append(('observation', obs.id, obs.text))
+            enriched = enrich_for_embedding(obs.text, obs.timestamp)
+            to_embed.append(('observation', obs.id, enriched))
     for s in session.query(Summary).all():
         if ('summary', s.id) not in existing and s.text and s.text.strip():
-            to_embed.append(('summary', s.id, s.text))
+            enriched = enrich_for_embedding(s.text, s.start_timestamp, s.end_timestamp)
+            to_embed.append(('summary', s.id, enriched))
     
     if not to_embed:
         click.echo('Nothing to embed.')

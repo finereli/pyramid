@@ -319,11 +319,13 @@ Generate embeddings for all observations and summaries.
 ```bash
 python cli.py embed
 python cli.py embed --parallel 20  # More parallel workers
+python cli.py embed --force        # Re-embed everything
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--parallel` | Number of parallel workers for batch processing (default: 10) |
+| `--force` | Clear existing embeddings and re-embed everything |
 
 Embeddings are batched by token count (max 250k tokens per request) and item count (max 2048 items per request) and processed in parallel.
 
@@ -434,6 +436,8 @@ Vector embedding utilities.
 - `MAX_TOKENS_PER_REQUEST` - Token limit per API call (250k)
 - `MAX_ITEMS_PER_REQUEST` - Item limit per API call (2048)
 - `TIME_DECAY_HALF_LIFE_DAYS` - Half-life for temporal decay (30 days)
+- `format_temporal_prefix(timestamp, end_timestamp)` - Generate temporal prefix string (e.g., "In June 2025: ")
+- `enrich_for_embedding(text, timestamp, end_timestamp)` - Prepend temporal context to text for embedding
 - `estimate_tokens(text)` - Estimate token count
 - `batch_by_tokens(texts, max_tokens, max_items)` - Split texts into batches respecting both limits
 - `get_embedding(text)` - Generate single embedding
@@ -484,6 +488,15 @@ Unassigned observations → assign_model calls → model assignment
 Observations (groups of 10) → summarize_observations → Tier 0 summaries
 Tier N summaries (groups of 10) → summarize_summaries → Tier N+1 summaries
 ```
+
+### Embedding Flow
+```
+Observation/Summary → enrich_for_embedding (prepend temporal prefix)
+                   → "In June 2025: User relocated to Austin"
+                   → get_embedding → store in memory_vec
+```
+
+Temporal enrichment prepends context like "In June 2025: " to text before embedding. This makes the embedding space temporally aware, so queries like "what happened in June?" naturally find content from that time period via semantic similarity.
 
 ### Search Flow
 ```

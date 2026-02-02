@@ -10,6 +10,28 @@ load_dotenv()
 
 client = OpenAI()
 EMBEDDING_MODEL = "text-embedding-3-small"
+
+
+def format_temporal_prefix(timestamp, end_timestamp=None):
+    if timestamp is None:
+        return ""
+    if isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    if end_timestamp:
+        if isinstance(end_timestamp, str):
+            end_timestamp = datetime.fromisoformat(end_timestamp.replace('Z', '+00:00'))
+        if timestamp.year == end_timestamp.year and timestamp.month == end_timestamp.month:
+            return f"In {timestamp.strftime('%B %Y')}: "
+        elif timestamp.year == end_timestamp.year:
+            return f"From {timestamp.strftime('%B')} to {end_timestamp.strftime('%B %Y')}: "
+        else:
+            return f"From {timestamp.strftime('%B %Y')} to {end_timestamp.strftime('%B %Y')}: "
+    return f"In {timestamp.strftime('%B %Y')}: "
+
+
+def enrich_for_embedding(text, timestamp, end_timestamp=None):
+    prefix = format_temporal_prefix(timestamp, end_timestamp)
+    return f"{prefix}{text}"
 EMBEDDING_DIM = 1536
 TIME_DECAY_HALF_LIFE_DAYS = 30
 

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, UTC
 from embeddings import (
     serialize_embedding, deserialize_embedding, estimate_tokens,
     batch_by_tokens, compute_time_penalty, EMBEDDING_DIM, MAX_TOKENS_PER_REQUEST,
-    TIME_DECAY_HALF_LIFE_DAYS
+    TIME_DECAY_HALF_LIFE_DAYS, format_temporal_prefix, enrich_for_embedding
 )
 
 
@@ -83,3 +83,41 @@ def test_compute_time_penalty_old():
 def test_compute_time_penalty_none():
     penalty = compute_time_penalty(None)
     assert penalty == 0.5
+
+
+def test_format_temporal_prefix_single_timestamp():
+    ts = datetime(2025, 6, 15, tzinfo=UTC)
+    assert format_temporal_prefix(ts) == "In June 2025: "
+
+
+def test_format_temporal_prefix_same_month():
+    start = datetime(2025, 6, 1, tzinfo=UTC)
+    end = datetime(2025, 6, 30, tzinfo=UTC)
+    assert format_temporal_prefix(start, end) == "In June 2025: "
+
+
+def test_format_temporal_prefix_different_months_same_year():
+    start = datetime(2025, 3, 1, tzinfo=UTC)
+    end = datetime(2025, 6, 30, tzinfo=UTC)
+    assert format_temporal_prefix(start, end) == "From March to June 2025: "
+
+
+def test_format_temporal_prefix_different_years():
+    start = datetime(2024, 11, 1, tzinfo=UTC)
+    end = datetime(2025, 2, 28, tzinfo=UTC)
+    assert format_temporal_prefix(start, end) == "From November 2024 to February 2025: "
+
+
+def test_format_temporal_prefix_none():
+    assert format_temporal_prefix(None) == ""
+
+
+def test_enrich_for_embedding():
+    ts = datetime(2025, 6, 15, tzinfo=UTC)
+    result = enrich_for_embedding("User relocated to Austin", ts)
+    assert result == "In June 2025: User relocated to Austin"
+
+
+def test_enrich_for_embedding_no_timestamp():
+    result = enrich_for_embedding("Some fact", None)
+    assert result == "Some fact"
