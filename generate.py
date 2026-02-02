@@ -173,7 +173,7 @@ def render_model_file(data, content):
     return '\n'.join(lines)
 
 
-def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=True, on_progress=None, max_workers=10, ref_date=None):
+def export_models(workspace, db_path='pyramid.db', debug=False, do_synthesize=True, on_progress=None, max_workers=10, ref_date=None):
     workspace = Path(workspace)
     session = get_session(db_path)
     

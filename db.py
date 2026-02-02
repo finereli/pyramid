@@ -40,11 +40,11 @@ class Summary(Base):
     model = relationship('Model', back_populates='summaries')
 
 
-def get_engine(db_path='memory.db'):
+def get_engine(db_path='pyramid.db'):
     return create_engine(f'sqlite:///{db_path}')
 
 
-def get_session(db_path='memory.db'):
+def get_session(db_path='pyramid.db'):
     engine = get_engine(db_path)
     Session = sessionmaker(bind=engine)
     return Session()
@@ -56,7 +56,7 @@ BASE_MODELS = {
 }
 
 
-def init_db(db_path='memory.db'):
+def init_db(db_path='pyramid.db'):
     engine = get_engine(db_path)
     Base.metadata.create_all(engine)
     

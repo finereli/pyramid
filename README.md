@@ -372,12 +372,12 @@ The `generate` command generates markdown files from models for workspace integr
 **Important:** `SOUL.md` and `USER.md` are identity files that should be hand-crafted. Generate does NOT overwrite them. Instead, the synthesized assistant and user memories go into `MEMORY.md`.
 
 ```bash
-python cli.py generate /path/to/workspace --db memory.db
+python cli.py generate /path/to/workspace --db pyramid.db
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--db` | Path to database file (default: memory.db) |
+| `--db` | Path to database file (default: pyramid.db) |
 | `--debug` | Include source info (tier, id, date range) |
 | `--no-synthesize` | Skip LLM synthesis, just concatenate summaries |
 | `--parallel`, `-p` | Number of parallel workers for synthesis (default: 10) |

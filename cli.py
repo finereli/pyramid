@@ -146,7 +146,7 @@ def summarize(start, max_obs, max_tier, parallel, clean):
 @click.option('--force', is_flag=True, help='Clear existing embeddings and re-embed everything')
 def embed(parallel, force):
     session = get_session()
-    conn = sqlite3.connect('memory.db')
+    conn = sqlite3.connect('pyramid.db')
     enable_vec(conn)
     init_memory_vec(conn)
     
@@ -192,7 +192,7 @@ def embed(parallel, force):
 @click.option('--time-weight', '-t', default=0.3, help='Time decay weight (0=pure semantic, 1=heavy recency bias)')
 def search(query, limit, raw, time_weight):
     session = get_session()
-    conn = sqlite3.connect('memory.db')
+    conn = sqlite3.connect('pyramid.db')
     enable_vec(conn)
     
     results = search_memory(conn, query, limit, time_weight=time_weight)
@@ -237,7 +237,7 @@ def search(query, limit, raw, time_weight):
 
 @cli.command(help='Generate markdown files from models.')
 @click.argument('workspace')
-@click.option('--db', default='memory.db', help='Path to database file')
+@click.option('--db', default='pyramid.db', help='Path to database file')
 @click.option('--debug', is_flag=True, help='Include source info (tier, id, date range)')
 @click.option('--no-synthesize', is_flag=True, help='Skip LLM synthesis, just concatenate summaries')
 @click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
