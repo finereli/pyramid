@@ -369,6 +369,8 @@ python cli.py search "historical facts" --time-weight 0   # pure semantic
 
 The `generate` command generates markdown files from models for workspace integration. By default, it synthesizes each model's pyramid into coherent narrative prose.
 
+**Important:** `SOUL.md` and `USER.md` are identity files that should be hand-crafted. Generate does NOT overwrite them. Instead, the synthesized assistant and user memories go into `MEMORY.md`.
+
 ```bash
 python cli.py generate /path/to/workspace --db memory.db
 ```
@@ -382,27 +384,40 @@ python cli.py generate /path/to/workspace --db memory.db
 
 ### Output Files
 
-| Model | File |
-|-------|------|
-| `self` | `SOUL.md` |
-| `user` | `USER.md` |
-| (other) | `models/{name}.md` |
-| (index) | `MEMORY.md` |
+| Output | Contents |
+|--------|----------|
+| `MEMORY.md` | Synthesized self + user memories, index of other models |
+| `models/{name}.md` | Individual model files for non-core models |
 
-### File Format
+**Not generated** (identity files, hand-crafted):
+- `SOUL.md` - Who the assistant is
+- `USER.md` - Who the user is
+
+### MEMORY.md Format
 
 ```markdown
----
-name: user
-description: Information about the primary human user
+# Memory
+
+Synthesized memory from conversations. SOUL.md and USER.md are identity files and not overwritten.
+
 ---
 
-# User
+## Self
 
-Eli is a software engineer based in Austin who relocated there in May 2025.
-He is starting a consulting practice focused on AI. He has been coding for
-15 years, starting with PHP, and now prefers Python for scripting and
-TypeScript for web projects.
+[Synthesized assistant/self observations organized by time...]
+
+---
+
+## User
+
+[Synthesized user observations organized by time...]
+
+---
+
+## Other Models
+
+- [models/project-a.md](models/project-a.md): Project A - description
+- [models/person-b.md](models/person-b.md): Person B - description
 ```
 
 The synthesized content:
@@ -485,11 +500,13 @@ Message loading from various formats.
 ### `generate.py`
 Markdown generation with synthesis.
 
-- `CORE_MODEL_FILES` - Mapping of base models to filenames
+- `CORE_MODELS` - List of core model names (assistant, user) that go in MEMORY.md
 - `TIER_LABELS` - Display labels for tiers
 - `update_model_descriptions(session, on_progress)` - Fill in missing descriptions
-- `render_memory_index(core_models, other_models)` - Generate index
-- `render_model(data, do_synthesize, debug)` - Render single model to markdown
+- `render_memory(assistant_content, user_content, other_models)` - Generate MEMORY.md content
+- `synthesize_model_content(data)` - LLM synthesis for a model
+- `render_model_content(data, debug)` - Raw rendering without synthesis
+- `render_model_file(data, content)` - Wrap content in model file format
 - `export_models(workspace, db_path, debug, do_synthesize, on_progress)` - Main export function
 
 ### `cli.py`

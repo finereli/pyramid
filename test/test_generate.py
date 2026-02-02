@@ -1,51 +1,49 @@
 import pytest
-from generate import render_memory_index, CORE_MODEL_FILES, TIER_LABELS
+from generate import render_memory, CORE_MODELS, TIER_LABELS
 
 
-def test_render_memory_index_core_only():
-    core_models = [
-        ({'description': 'The AI assistant'}, 'SOUL.md'),
-        ({'description': 'Primary user'}, 'USER.md'),
-    ]
+def test_render_memory_with_content():
+    assistant_content = "I am Glenn, an AI assistant."
+    user_content = "Eli is a software engineer."
+    other_models = []
     
-    content = render_memory_index(core_models, [])
+    content = render_memory(assistant_content, user_content, other_models)
     
     assert '# Memory' in content
-    assert '## Core' in content
-    assert '[SOUL.md](SOUL.md)' in content
-    assert '[USER.md](USER.md)' in content
-    assert '## Models' not in content
+    assert '## Self' in content
+    assert '## User' in content
+    assert 'Glenn' in content
+    assert 'Eli' in content
+    assert '## Other Models' not in content
 
 
-def test_render_memory_index_with_other_models():
-    core_models = [
-        ({'description': 'The AI assistant'}, 'SOUL.md'),
-    ]
+def test_render_memory_with_other_models():
+    assistant_content = "Assistant content"
+    user_content = "User content"
     other_models = [
         ({'description': 'Python project'}, 'models/python.md'),
         ({'description': 'Japan trip'}, 'models/japan-2025.md'),
     ]
     
-    content = render_memory_index(core_models, other_models)
+    content = render_memory(assistant_content, user_content, other_models)
     
-    assert '## Core' in content
-    assert '## Models' in content
+    assert '## Self' in content
+    assert '## User' in content
+    assert '## Other Models' in content
     assert 'models/python.md' in content
     assert 'models/japan-2025.md' in content
 
 
-def test_render_memory_index_empty_description():
-    core_models = [
-        ({'description': None}, 'SOUL.md'),
-    ]
+def test_render_memory_empty_content():
+    content = render_memory('', '', [])
     
-    content = render_memory_index(core_models, [])
-    assert '[SOUL.md](SOUL.md):' in content
+    assert '*No assistant observations yet.*' in content
+    assert '*No user observations yet.*' in content
 
 
-def test_core_model_files():
-    assert CORE_MODEL_FILES['assistant'] == 'SOUL.md'
-    assert CORE_MODEL_FILES['user'] == 'USER.md'
+def test_core_models():
+    assert 'assistant' in CORE_MODELS
+    assert 'user' in CORE_MODELS
 
 
 def test_tier_labels():

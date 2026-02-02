@@ -6,10 +6,7 @@ from llm import client, MODEL
 from pyramid import get_pyramid, get_unsummarized_observations, synthesize_model
 
 
-CORE_MODEL_FILES = {
-    'assistant': 'SOUL.md',
-    'user': 'USER.md',
-}
+CORE_MODELS = ['assistant', 'user']
 
 TIER_LABELS = {
     0: 'Recent',
@@ -79,27 +76,36 @@ Examples:
     session.commit()
 
 
-def render_memory_index(core_models, other_models):
+def render_memory(assistant_content, user_content, other_models):
     lines = [
         '# Memory',
         '',
-        '## Core',
+        'Synthesized memory from conversations. SOUL.md and USER.md are identity files and not overwritten.',
+        '',
+        '---',
+        '',
+        '## Self',
+        '',
+        assistant_content or '*No assistant observations yet.*',
+        '',
+        '---',
+        '',
+        '## User',
+        '',
+        user_content or '*No user observations yet.*',
         '',
     ]
     
-    for data, path in core_models:
-        desc = data['description'] if isinstance(data, dict) else data.description
-        lines.append(f'- [{path}]({path}): {desc or ""}')
-    
     if other_models:
+        lines.append('---')
         lines.append('')
-        lines.append('## Models')
+        lines.append('## Other Models')
         lines.append('')
         for data, path in other_models:
             desc = data['description'] if isinstance(data, dict) else data.description
             lines.append(f'- [{path}]({path}): {desc or ""}')
+        lines.append('')
     
-    lines.append('')
     return '\n'.join(lines)
 
 
@@ -108,30 +114,51 @@ def write_file(path, content):
     path.write_text(content)
 
 
-def render_model(data, do_synthesize=True, debug=False):
+def synthesize_model_content(data):
     by_tier = data['by_tier']
     unsummarized = data['unsummarized']
     unsummarized_ts = data.get('unsummarized_ts', [])
     ref_date = data.get('ref_date')
     
+    if not by_tier and not unsummarized:
+        return ''
+    
     unsummarized_with_ts = list(zip(unsummarized, unsummarized_ts)) if unsummarized_ts else [(t, ref_date) for t in unsummarized]
     
-    if do_synthesize and (by_tier or unsummarized) and not debug:
-        synthesized = synthesize_model(data['name'], data['description'], by_tier, unsummarized_with_ts, ref_date)
-        if synthesized:
-            lines = [
-                '---',
-                f'name: {data["name"]}',
-                f'description: {data["description"] or ""}',
-                '---',
-                '',
-                f'# {data["name"].title()}',
-                '',
-                synthesized,
-                '',
-            ]
-            return '\n'.join(lines)
+    return synthesize_model(data['name'], data['description'], by_tier, unsummarized_with_ts, ref_date) or ''
+
+
+def render_model_content(data, debug=False):
+    by_tier = data['by_tier']
+    unsummarized = data['unsummarized']
     
+    if not by_tier and not unsummarized:
+        return ''
+    
+    lines = []
+    
+    for tier in sorted(by_tier.keys()):
+        label = TIER_LABELS.get(tier, f'Tier {tier}')
+        lines.append(f'### {label}')
+        lines.append('')
+        for s in by_tier[tier]:
+            if debug:
+                lines.append(f'#### T{tier} ({s["end_timestamp"]:%Y-%m-%d})')
+                lines.append('')
+            lines.append(s['text'])
+            lines.append('')
+    
+    if unsummarized:
+        lines.append('### Unsummarized')
+        lines.append('')
+        for text in unsummarized:
+            lines.append(f'- {text}')
+        lines.append('')
+    
+    return '\n'.join(lines)
+
+
+def render_model_file(data, content):
     lines = [
         '---',
         f'name: {data["name"]}',
@@ -140,26 +167,9 @@ def render_model(data, do_synthesize=True, debug=False):
         '',
         f'# {data["name"].title()}',
         '',
+        content,
+        '',
     ]
-    
-    for tier in sorted(by_tier.keys()):
-        label = TIER_LABELS.get(tier, f'Tier {tier}')
-        lines.append(f'## {label}')
-        lines.append('')
-        for s in by_tier[tier]:
-            if debug:
-                lines.append(f'### T{tier} ({s["end_timestamp"]:%Y-%m-%d})')
-                lines.append('')
-            lines.append(s['text'])
-            lines.append('')
-    
-    if unsummarized:
-        lines.append('## Unsummarized')
-        lines.append('')
-        for text in unsummarized:
-            lines.append(f'- {text}')
-        lines.append('')
-    
     return '\n'.join(lines)
 
 
@@ -178,11 +188,6 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
         by_tier = get_pyramid(session, model.id)
         unsummarized = get_unsummarized_observations(session, model.id, by_tier)
         
-        if model.name in CORE_MODEL_FILES:
-            filename = CORE_MODEL_FILES[model.name]
-        else:
-            filename = f'models/{model.name}.md'
-        
         model_data.append({
             'name': model.name,
             'description': model.description,
@@ -190,13 +195,11 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
                         for tier, sums in by_tier.items()},
             'unsummarized': [o.text for o in unsummarized],
             'unsummarized_ts': [o.timestamp for o in unsummarized],
-            'filename': filename,
             'ref_date': global_ref_date,
         })
     
     session.close()
     
-    core_models = []
     other_models = []
     results = {}
     
@@ -205,7 +208,7 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
             on_progress(f"Synthesizing {len(model_data)} models...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(render_model, data, do_synthesize, debug): data for data in model_data}
+            futures = {executor.submit(synthesize_model_content, data): data for data in model_data}
             for i, future in enumerate(as_completed(futures), 1):
                 data = futures[future]
                 results[data['name']] = future.result()
@@ -213,18 +216,19 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
                     on_progress(f"  [{i}/{len(model_data)}] {data['name']}")
     else:
         for data in model_data:
-            results[data['name']] = render_model(data, do_synthesize, debug)
+            results[data['name']] = render_model_content(data, debug)
+    
+    assistant_content = results.get('assistant', '')
+    user_content = results.get('user', '')
     
     for data in model_data:
-        content = results[data['name']]
-        path = workspace / data['filename']
+        if data['name'] in CORE_MODELS:
+            continue
         
-        if data['name'] in CORE_MODEL_FILES:
-            core_models.append((data, data['filename']))
-        else:
-            other_models.append((data, data['filename']))
-        
+        content = render_model_file(data, results[data['name']])
+        path = workspace / f'models/{data["name"]}.md'
+        other_models.append((data, f'models/{data["name"]}.md'))
         write_file(path, content)
     
-    memory_content = render_memory_index(core_models, other_models)
+    memory_content = render_memory(assistant_content, user_content, other_models)
     write_file(workspace / 'MEMORY.md', memory_content)
