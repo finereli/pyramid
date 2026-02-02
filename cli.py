@@ -241,9 +241,16 @@ def search(query, limit, raw, time_weight):
 @click.option('--debug', is_flag=True, help='Include source info (tier, id, date range)')
 @click.option('--no-synthesize', is_flag=True, help='Skip LLM synthesis, just concatenate summaries')
 @click.option('--parallel', '-p', default=10, type=int, help='Number of parallel workers (default: 10)')
-def generate(workspace, db, debug, no_synthesize, parallel):
+@click.option('--ref-date', default=None, help='Reference date for time buckets (YYYY-MM-DD, default: today)')
+def generate(workspace, db, debug, no_synthesize, parallel, ref_date):
+    from datetime import datetime, UTC
+    
+    parsed_ref_date = None
+    if ref_date:
+        parsed_ref_date = datetime.strptime(ref_date, '%Y-%m-%d').replace(tzinfo=UTC)
+    
     progress = lambda msg: click.echo(msg)
-    export_models(workspace, db, debug, do_synthesize=not no_synthesize, on_progress=progress, max_workers=parallel)
+    export_models(workspace, db, debug, do_synthesize=not no_synthesize, on_progress=progress, max_workers=parallel, ref_date=parsed_ref_date)
     click.echo('Done')
 
 

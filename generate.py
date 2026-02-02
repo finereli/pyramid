@@ -173,7 +173,7 @@ def render_model_file(data, content):
     return '\n'.join(lines)
 
 
-def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=True, on_progress=None, max_workers=10):
+def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=True, on_progress=None, max_workers=10, ref_date=None):
     workspace = Path(workspace)
     session = get_session(db_path)
     
@@ -181,7 +181,8 @@ def export_models(workspace, db_path='memory.db', debug=False, do_synthesize=Tru
     
     models = session.query(Model).all()
     
-    global_ref_date = session.query(func.max(Observation.timestamp)).scalar()
+    from datetime import datetime, UTC
+    global_ref_date = ref_date or datetime.now(UTC)
     
     model_data = []
     for model in models:
