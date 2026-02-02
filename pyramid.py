@@ -39,6 +39,8 @@ def get_unsummarized_observations(session, model_id, by_tier):
 
 def bucket_by_time(items, ref_date):
     buckets = {label: [] for label, _ in TIME_BUCKETS}
+    if ref_date.tzinfo is not None:
+        ref_date = ref_date.replace(tzinfo=None)
     prev_cutoff = ref_date
     
     for label, delta in TIME_BUCKETS:
@@ -51,6 +53,8 @@ def bucket_by_time(items, ref_date):
             ts = item['end_timestamp'] if 'end_timestamp' in item else item.get('timestamp')
             if ts is None:
                 continue
+            if ts.tzinfo is not None:
+                ts = ts.replace(tzinfo=None)
             if cutoff is None:
                 if ts < prev_cutoff:
                     buckets[label].append(item)
