@@ -104,7 +104,10 @@ def render_memory(assistant_content, user_content, other_models):
 
 def write_file(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text() == content:
+        return False
     path.write_text(content)
+    return True
 
 
 def render_model_file(model):
@@ -150,8 +153,8 @@ def export_models(workspace, db_path='pyramid.db', on_progress=None, max_workers
     for model in other_models:
         content = render_model_file(model)
         path = workspace / f'models/{model.name}.md'
-        write_file(path, content)
-        regenerated.append(f'models/{model.name}.md')
+        if write_file(path, content):
+            regenerated.append(f'models/{model.name}.md')
     
     write_memory = model_ids is None or any(m.name in CORE_MODELS for m in models)
     if write_memory:
@@ -163,8 +166,8 @@ def export_models(workspace, db_path='pyramid.db', on_progress=None, max_workers
         assistant_content = assistant_model.synthesized_content if assistant_model else None
         user_content = user_model.synthesized_content if user_model else None
         memory_content = render_memory(assistant_content, user_content, other_models_index)
-        write_file(workspace / 'MEMORY.md', memory_content)
-        regenerated.append('MEMORY.md')
+        if write_file(workspace / 'MEMORY.md', memory_content):
+            regenerated.append('MEMORY.md')
     
     session.close()
     
