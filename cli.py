@@ -21,23 +21,6 @@ def cli():
     pass
 
 
-@cli.command(help='Add a single observation manually.')
-@click.option('--workspace', '-w', required=True, help='Workspace directory')
-@click.option('--db', default='pyramid.db', help='Database filename (default: pyramid.db)')
-@click.argument('text')
-def observe(workspace, db, text):
-    db_path = get_db_path(workspace, db)
-    Path(workspace).mkdir(parents=True, exist_ok=True)
-    init_db(str(db_path))
-    
-    session = get_session(str(db_path))
-    obs = Observation(text=text, timestamp=datetime.now(UTC))
-    session.add(obs)
-    session.commit()
-    click.echo(f'Added observation #{obs.id}')
-    session.close()
-
-
 @cli.command('import', help='Import conversations and extract observations.')
 @click.option('--workspace', '-w', required=True, help='Workspace directory')
 @click.option('--db', default='pyramid.db', help='Database filename (default: pyramid.db)')
@@ -197,6 +180,23 @@ def search(workspace, db, query, limit, raw, time_weight):
 @cli.group(help='Internal commands for debugging and manual control.')
 def internal():
     pass
+
+
+@internal.command('observe', help='Add a single observation manually.')
+@click.option('--workspace', '-w', required=True, help='Workspace directory')
+@click.option('--db', default='pyramid.db', help='Database filename (default: pyramid.db)')
+@click.argument('text')
+def observe_cmd(workspace, db, text):
+    db_path = get_db_path(workspace, db)
+    Path(workspace).mkdir(parents=True, exist_ok=True)
+    init_db(str(db_path))
+    
+    session = get_session(str(db_path))
+    obs = Observation(text=text, timestamp=datetime.now(UTC))
+    session.add(obs)
+    session.commit()
+    click.echo(f'Added observation #{obs.id}')
+    session.close()
 
 
 @internal.command('summarize', help='Run summarization to compress observations.')

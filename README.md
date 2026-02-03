@@ -57,12 +57,14 @@ python cli.py sync -w ~/memory --source ~/.openclaw/agents/main/sessions
 - On a schedule (e.g., every few hours)
 - Before starting work that needs fresh memory context
 
-**If starting fresh with no history**: Just run `observe` commands to add observations manually, then `sync`:
+**If starting fresh with no history**: Use `internal observe` to add observations manually, then `sync`:
 ```bash
-python cli.py observe -w ~/memory "User prefers dark mode"
-python cli.py observe -w ~/memory "User's name is Alex"
+python cli.py internal observe -w ~/memory "User prefers dark mode"
+python cli.py internal observe -w ~/memory "User's name is Alex"
 python cli.py sync -w ~/memory
 ```
+
+Note: `observe` is an internal command because single observations are assigned in small batches, which limits the system's ability to discover new models. Prefer bulk imports via `import` or incremental sync via `sync --source`.
 
 ---
 
@@ -343,13 +345,6 @@ All commands require `--workspace` / `-w` to specify the workspace directory.
 
 ### Main Commands
 
-### `observe`
-Add a single observation manually.
-
-```bash
-python cli.py observe -w ~/memory "User prefers vim keybindings"
-```
-
 ### `import`
 Extract observations from existing conversation data.
 
@@ -431,6 +426,13 @@ python cli.py search -w ~/memory "historical facts" --time-weight 0   # pure sem
 ### Internal Commands
 
 For debugging and manual control. Accessed via `cli.py internal COMMAND`.
+
+#### `internal observe`
+Add a single observation manually. Note: single observations are assigned in small batches, limiting the system's ability to discover new models. Prefer bulk imports.
+
+```bash
+python cli.py internal observe -w ~/memory "User prefers vim keybindings"
+```
 
 #### `internal summarize`
 Run summarization only.
