@@ -212,7 +212,9 @@ def load_openclaw_incremental(source=None, session_tracking=None):
 
 # --- Git log loader ---
 
-COMMIT_SEPARATOR = '@@PYRAMID_COMMIT_BOUNDARY_7f3a9e2b@@'
+# Built at runtime so it never appears as a literal in source (avoids self-referential
+# parsing failures when running on repos that contain this file).
+COMMIT_SEPARATOR = '@@' + 'PYRAMID' + '_COMMIT_' + 'SEP_8d4f1c' + '@@'
 MAX_DIFF_CHARS = 4000  # Cap diff per commit to keep LLM context manageable
 
 

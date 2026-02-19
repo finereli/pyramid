@@ -4,9 +4,60 @@ Build a developer's mental model of any codebase from its git history.
 
 Instead of reading every file, this tool processes git commits (messages + diffs) through an LLM to extract architectural observations, organizes them into naturally-emerging subsystem models, and synthesizes them into compressed, temporally-organized narratives. The result reads like notes from a developer who's been on the project for months — not documentation, but *understanding*.
 
-## What it produces
+## Example: this repo's own mental model
 
-From a repo's git history, you get:
+We ran code-awareness on its own git history. The full output is in [`example/`](example/) — here's what the architecture model looks like:
+
+> **Architecture** ([full file](example/models/architecture.md))
+>
+> *Last 3 Days* — The system uses a pyramid memory architecture that varies temporal resolution to emulate human memory: recent observations retain high detail while older data is progressively compressed into summarized tiers. Observations are extracted as discrete factual statements from conversations, organized hierarchically into tiers and temporally bucketed relative to the current day...
+>
+> For database initialization, customizable base models seed mental model categories. In code-centric environments, five predefined git base models — architecture, server, client, database, and deployment — serve as foundational subsystems organizing observed knowledge.
+>
+> *This Month* — Core components align to functionality with specific modules: `cli.py` (command orchestration), `llm.py` (LLM interfacing and chunk processing), `summarize.py` (tiered summarization logic), `pyramid.py` (memory retrieval and synthesis), `export_models.py` (markdown export), and `db.py` (database models and ORM access)...
+>
+> *This Quarter* — The pyramid memory system structures Observations — short factual statements extracted from first-person conversations with timestamps — within mental models such as self, user, system, or dynamically discovered topics...
+
+Five models were generated from 61 commits:
+
+| Model | What it captured |
+|-------|-----------------|
+| [architecture](example/models/architecture.md) | Pyramid memory design, temporal bucketing, tiered compression, relationship-aware retrieval |
+| [server](example/models/server.md) | LLM extraction pipeline, git log loader, observation assignment, embedding generation |
+| [client](example/models/client.md) | CLI commands, workspace management, sync pipeline, file output conventions |
+| [database](example/models/database.md) | SQLite schema, ORM models, sqlite-vec embeddings, schema evolution |
+| [deployment](example/models/deployment.md) | *(empty — this repo has no deployment infrastructure)* |
+
+On a more complex codebase, additional models **emerge automatically**. For example, running on a chat application with 53 commits produced 8 models — the 5 base models plus `memory-system`, `twitter-api`, and `recent-context-system`, all discovered from commit patterns without any configuration.
+
+## Quick start
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set your OpenAI API key
+export OPENAI_API_KEY=sk-...
+
+# Run on any git repo
+python cli.py git-sync -w ./my-project-awareness --repo /path/to/repo
+
+# Read the output
+cat ./my-project-awareness/MEMORY.md
+ls ./my-project-awareness/models/
+```
+
+### Ongoing updates
+
+After new commits:
+
+```bash
+python cli.py git-sync -w ./my-project-awareness --repo /path/to/repo
+```
+
+This incrementally processes only new commits since the last sync, updates affected summaries, and re-synthesizes changed models.
+
+## What it produces
 
 ```
 workspace/
@@ -22,53 +73,14 @@ workspace/
     ...
 ```
 
-**Base models** (architecture, server, client, database, deployment) are seeded to give the LLM reasonable starting categories. **Additional models emerge naturally** as the LLM discovers distinct subsystems in the commit history — things like `memory-system`, `streaming`, `auth`, or `twitter-api` get their own files automatically.
+**Base models** (architecture, server, client, database, deployment) are seeded to give the LLM reasonable starting categories. **Additional models emerge naturally** as the LLM discovers distinct subsystems in the commit history.
 
 Each model is organized by time:
 - **Last 3 Days** — full detail on recent changes
 - **This Week / Month / Quarter / Year** — progressively compressed
 - **Earlier** — broad strokes
 
-This means recent work is vivid and older decisions fade to their essentials — like how a developer actually remembers a project.
-
-## Quick Start
-
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Set your OpenAI API key
-echo "OPENAI_API_KEY=sk-..." > .env
-# or: export OPENAI_API_KEY=sk-...
-
-# 3. Run the full pipeline on any git repo
-python cli.py import -w ./my-project-awareness --git --source /path/to/repo
-
-# 4. Summarize, synthesize, and generate markdown
-python cli.py internal summarize -w ./my-project-awareness
-python cli.py internal synthesize -w ./my-project-awareness
-python cli.py internal generate -w ./my-project-awareness
-
-# 5. Read the output
-cat ./my-project-awareness/MEMORY.md
-ls ./my-project-awareness/models/
-```
-
-Or use `git-sync` to do it all in one command:
-
-```bash
-python cli.py git-sync -w ./my-project-awareness --repo /path/to/repo
-```
-
-### Ongoing updates
-
-After new commits are pushed:
-
-```bash
-python cli.py git-sync -w ./my-project-awareness --repo /path/to/repo
-```
-
-This incrementally processes only new commits since the last sync, updates affected summaries, and re-synthesizes changed models. The system tracks the last processed commit automatically.
+Recent work is vivid and older decisions fade to their essentials — like how a developer actually remembers a project.
 
 ## How it works
 
@@ -104,9 +116,9 @@ Feed the generated markdown into an AI coding agent's context to give it genuine
 
 This is different from documentation. Documentation describes the intended state. Code awareness describes the *actual* state — including the dead ends, the refactors, and the design decisions that only show up in the commit history.
 
-## CLI Reference
+## CLI reference
 
-### Main Commands
+### Main commands
 
 | Command | Description |
 |---------|-------------|
