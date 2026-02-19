@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy import create_engine, text
@@ -207,3 +208,150 @@ def load_openclaw_incremental(source=None, session_tracking=None):
     
     messages.sort(key=lambda m: m.get('timestamp', ''))
     return messages, updated_tracking, changed_files
+
+
+# --- Git log loader ---
+
+COMMIT_SEPARATOR = '---COMMIT_BOUNDARY---'
+MAX_DIFF_CHARS = 4000  # Cap diff per commit to keep LLM context manageable
+
+
+def parse_git_log(raw_output):
+    """Parse structured git log output into commit dicts."""
+    commits = []
+
+    for block in raw_output.split(COMMIT_SEPARATOR):
+        block = block.strip()
+        if not block:
+            continue
+
+        lines = block.split('\n')
+        if len(lines) < 4:
+            continue
+
+        commit_hash = lines[0].strip()
+        timestamp = lines[1].strip()
+        author = lines[2].strip()
+
+        # Message is everything until the diff starts
+        message_lines = []
+        diff_lines = []
+        in_diff = False
+
+        for line in lines[3:]:
+            if line.startswith('diff --git') and not in_diff:
+                in_diff = True
+            if in_diff:
+                diff_lines.append(line)
+            else:
+                message_lines.append(line)
+
+        message = '\n'.join(message_lines).strip()
+        diff = '\n'.join(diff_lines).strip()
+
+        # Truncate diff if too large
+        if len(diff) > MAX_DIFF_CHARS:
+            diff = diff[:MAX_DIFF_CHARS] + '\n... [diff truncated]'
+
+        commits.append({
+            'hash': commit_hash,
+            'timestamp': timestamp,
+            'author': author,
+            'message': message,
+            'diff': diff,
+        })
+
+    return commits
+
+
+def load_git_commits(source, limit=None, since=None, since_commit=None):
+    """
+    Load git commits from a repository path.
+
+    Args:
+        source: Path to git repository
+        limit: Max number of commits to load
+        since: ISO date string to start from (e.g., '2025-01-01')
+        since_commit: Load only commits after this hash (exclusive)
+
+    Returns:
+        (messages, metadata) matching the loader interface
+    """
+    repo_path = Path(source).resolve()
+
+    if not (repo_path / '.git').exists() and not repo_path.name == '.git':
+        return [], f"Not a git repository: {repo_path}"
+
+    # Build git log command
+    fmt = f'%n{COMMIT_SEPARATOR}%n%H%n%aI%n%aN%n%B'
+    cmd = ['git', '-C', str(repo_path), 'log', f'--format={fmt}', '--patch', '--reverse']
+
+    if since:
+        cmd.append(f'--since={since}')
+
+    if since_commit:
+        cmd.append(f'{since_commit}..HEAD')
+
+    if limit:
+        cmd.append(f'-{limit}')
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+    if result.returncode != 0:
+        return [], f"git log failed: {result.stderr.strip()}"
+
+    commits = parse_git_log(result.stdout)
+
+    # Convert to the message format the pipeline expects
+    messages = []
+    for commit in commits:
+        # Build content that gives the LLM enough to extract architectural observations
+        parts = [f"Commit: {commit['hash'][:8]}"]
+        parts.append(f"Author: {commit['author']}")
+        parts.append(f"Message: {commit['message']}")
+
+        if commit['diff']:
+            parts.append(f"\nDiff:\n{commit['diff']}")
+
+        messages.append({
+            'role': 'assistant',  # System documenting its own changes
+            'content': '\n'.join(parts),
+            'timestamp': commit['timestamp'],
+        })
+
+    metadata = f"Loaded {len(messages)} commits from {repo_path}"
+    if since_commit:
+        metadata += f" (since {since_commit[:8]})"
+
+    return messages, metadata
+
+
+def load_git_incremental(source, last_commit_hash=None):
+    """
+    Load only new commits since the last processed one.
+
+    Args:
+        source: Path to git repository
+        last_commit_hash: Hash of the last commit we processed
+
+    Returns:
+        (messages, new_last_hash, commit_count)
+    """
+    repo_path = Path(source).resolve()
+
+    # Get current HEAD
+    result = subprocess.run(
+        ['git', '-C', str(repo_path), 'rev-parse', 'HEAD'],
+        capture_output=True, text=True
+    )
+    current_head = result.stdout.strip()
+
+    if last_commit_hash and current_head == last_commit_hash:
+        return [], current_head, 0
+
+    messages, metadata = load_git_commits(
+        source,
+        since_commit=last_commit_hash
+    )
+
+    return messages, current_head, len(messages)
