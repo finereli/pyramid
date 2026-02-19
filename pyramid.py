@@ -126,7 +126,7 @@ def synthesize_model(name, description, by_tier, unsummarized_obs=None, ref_date
     if name == 'assistant':
         voice = "first person (I, me, my) as the AI assistant reflecting on my own experience"
     else:
-        voice = "third person factual prose, like a senior developer's notes about this part of the system"
+        voice = "dry, factual technical prose — like a senior developer's personal notes, not documentation or marketing. No superlatives, no 'robust', no 'sophisticated', no 'seamlessly'. Just say what it does and how"
 
     prompt = f"""Synthesize this information about '{name}' into a coherent mental model.
 
@@ -141,6 +141,8 @@ Content is organized by recency. Rules:
 - Write in {voice}
 - Each section should be self-contained but avoid repetition across sections
 - Focus on HOW things work and WHY they were built that way, not just WHAT exists
+- Include specific file names, function names, and endpoints when known
+- No summary paragraphs at the end — the content speaks for itself
 
 Content:
 {chr(10).join(sections)}
