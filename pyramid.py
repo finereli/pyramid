@@ -126,8 +126,8 @@ def synthesize_model(name, description, by_tier, unsummarized_obs=None, ref_date
     if name == 'assistant':
         voice = "first person (I, me, my) as the AI assistant reflecting on my own experience"
     else:
-        voice = "third person narrative prose"
-    
+        voice = "third person factual prose, like a senior developer's notes about this part of the system"
+
     prompt = f"""Synthesize this information about '{name}' into a coherent mental model.
 
 Model purpose: {description or 'Not specified'}
@@ -137,9 +137,10 @@ Content is organized by recency. Rules:
 - Output MUST have these sections: Last 3 Days, This Week, This Month, This Quarter, This Year, Earlier
 - Only include sections that have content
 - Within each section, synthesize and deduplicate the information
-- Newer details override older ones (e.g., if age changes, use the most recent)
+- Newer details override older ones (e.g., if a pattern was replaced, describe the current state)
 - Write in {voice}
 - Each section should be self-contained but avoid repetition across sections
+- Focus on HOW things work and WHY they were built that way, not just WHAT exists
 
 Content:
 {chr(10).join(sections)}

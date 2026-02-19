@@ -55,16 +55,25 @@ def get_models_context(session, include_samples=True):
 def assign_models_to_observations(session, observations, on_progress=None):
     if not observations:
         return
-    
-    base_models_text = "\n".join(f"- {name}: {desc}" for name, desc in BASE_MODELS.items())
-    system_prompt = f"""You assign observations to mental models. Call assign_model for each observation.
 
-Base models:
-{base_models_text}
+    # Read existing models from the database
+    existing_models = session.query(Model).all()
+    models_text = "\n".join(f"- {m.name}: {m.description or '(no description)'}" for m in existing_models)
 
-Create new models for distinct entities (specific people, projects, topics) only when you see 
-multiple observations about them in the current batch. If an observation doesn't fit well 
-anywhere, you may leave it unassigned by not calling assign_model for it."""
+    system_prompt = f"""You assign code observations to models representing parts of the system. Call assign_model for each observation.
+
+Existing models:
+{models_text}
+
+IMPORTANT: Actively create new models for distinct subsystems, components, or cross-cutting concerns.
+Use names derived from the codebase structure — directories, files, modules, or logical groupings.
+
+Good model names: "server", "client", "database", "streaming", "authentication", "memory-system", "deployment"
+Bad model names: "system" (too broad), "misc" (meaningless), "code" (everything is code)
+
+Every observation should be assigned. If nothing fits, create a specific new model rather than
+using a broad catch-all. Think about how a developer organizes their mental model of a codebase —
+by subsystem and concern, not in one big bucket."""
 
     for i in range(0, len(observations), STEP):
         batch = observations[i:i + STEP]
