@@ -12,6 +12,7 @@ import pytest
 def test_parse_git_log_basic():
     from loaders import parse_git_log, COMMIT_SEPARATOR
 
+
     raw = f"""
 {COMMIT_SEPARATOR}
 abc1234def5678

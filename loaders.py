@@ -212,7 +212,7 @@ def load_openclaw_incremental(source=None, session_tracking=None):
 
 # --- Git log loader ---
 
-COMMIT_SEPARATOR = '---COMMIT_BOUNDARY---'
+COMMIT_SEPARATOR = '@@PYRAMID_COMMIT_BOUNDARY_7f3a9e2b@@'
 MAX_DIFF_CHARS = 4000  # Cap diff per commit to keep LLM context manageable
 
 
