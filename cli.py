@@ -2,7 +2,7 @@ import click
 import sqlite3
 from pathlib import Path
 from datetime import datetime, UTC
-from db import init_db, get_session, Observation, Model, Summary, ImportedSession
+from db import init_db, get_session, Observation, Model, Summary, ImportedSession, GIT_BASE_MODELS
 from llm import extract_observations, client, MODEL
 from summarize import run_tier0_summarization, run_higher_tier_summarization, run_all_summarization, mark_model_dirty
 from embeddings import embed_many, enable_vec, init_memory_vec, get_existing_embeddings, store_embeddings, search_memory, enrich_for_embedding
@@ -49,10 +49,10 @@ def import_cmd(workspace, db, source, format, limit, conversation, user, since, 
 
     db_path = get_db_path(workspace, db)
     Path(workspace).mkdir(parents=True, exist_ok=True)
-    init_db(str(db_path))
+    is_git = format == 'git'
+    init_db(str(db_path), base_models=GIT_BASE_MODELS if is_git else None)
 
     # Determine format-specific settings
-    is_git = format == 'git'
     system_prompt = GIT_OBSERVE_SYSTEM_PROMPT if is_git else None
     user_prompt_prefix = "Extract architectural observations from these git commits:" if is_git else None
 
@@ -170,7 +170,7 @@ def git_sync(workspace, db, repo, parallel):
     db_path = workspace_path / db
 
     workspace_path.mkdir(parents=True, exist_ok=True)
-    init_db(str(db_path))
+    init_db(str(db_path), base_models=GIT_BASE_MODELS)
 
     session = get_session(str(db_path))
     repo_path = str(Path(repo).resolve())
