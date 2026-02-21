@@ -141,7 +141,12 @@ def sync(workspace, db='pyramid.db', source=None, on_progress=None, max_workers=
     if dirty_processed and on_progress:
         on_progress(f"Regenerated {dirty_processed} dirty summaries")
     
-    embedded = embed_new_items(str(db_path), on_progress, max_workers)
+    try:
+        embedded = embed_new_items(str(db_path), on_progress, max_workers)
+    except Exception as e:
+        if on_progress:
+            on_progress(f"Skipping embeddings ({e.__class__.__name__}: {e})")
+        embedded = 0
     
     synthesized = synthesize_dirty_models(str(db_path), on_progress, max_workers)
     
