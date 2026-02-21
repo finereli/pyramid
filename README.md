@@ -8,7 +8,7 @@ You are an AI agent. Here is exactly what to do:
 # 1. Install dependencies (sqlite-vec is critical, it's a SQLite extension for vector search)
 pip install -r requirements.txt
 
-# 2. Set your API key
+# 2. Set your API key (see "Configurable Backends" below for alternatives)
 export OPENAI_API_KEY=sk-...
 
 # 3. Import your conversation history (pick ONE based on your source)
@@ -298,15 +298,64 @@ CREATE TABLE imported_sessions (
 
 ## LLM Integration
 
-### Configuration
+### Configurable Backends
+
+Pyramid uses any OpenAI-compatible API for both chat completions and embeddings. Configure via environment variables:
+
+**Chat completions (observation extraction, summarization, synthesis):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PYRAMID_LLM_BASE_URL` | OpenAI | API base URL |
+| `PYRAMID_LLM_API_KEY` | `OPENAI_API_KEY` | API key |
+| `PYRAMID_LLM_MODEL` | `gpt-4.1-mini` | Model name |
+
+**Embeddings (semantic search, vector storage):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PYRAMID_EMBEDDING_BASE_URL` | OpenAI | API base URL |
+| `PYRAMID_EMBEDDING_API_KEY` | Falls back to `PYRAMID_LLM_API_KEY` | API key |
+| `PYRAMID_EMBEDDING_MODEL` | `text-embedding-3-small` | Model name |
+| `PYRAMID_EMBEDDING_DIM` | `1536` | Embedding dimensions |
+
+**Example configurations:**
+
+```bash
+# OpenAI (default — just set the key)
+export OPENAI_API_KEY=sk-...
+
+# Anthropic Claude via OpenClaw gateway
+export PYRAMID_LLM_BASE_URL=http://192.168.1.30:18789/v1
+export PYRAMID_LLM_API_KEY=your-gateway-token
+export PYRAMID_LLM_MODEL=claude-sonnet-4-20250514
+
+# Ollama (fully local, free)
+export PYRAMID_LLM_BASE_URL=http://localhost:11434/v1
+export PYRAMID_LLM_API_KEY=unused
+export PYRAMID_LLM_MODEL=llama3.1:8b-instruct
+export PYRAMID_EMBEDDING_BASE_URL=http://localhost:11434/v1
+export PYRAMID_EMBEDDING_MODEL=nomic-embed-text
+export PYRAMID_EMBEDDING_DIM=768
+
+# Mix: Claude for LLM, OpenAI for embeddings
+export PYRAMID_LLM_BASE_URL=https://api.anthropic.com/v1
+export PYRAMID_LLM_API_KEY=sk-ant-...
+export PYRAMID_LLM_MODEL=claude-sonnet-4-20250514
+export OPENAI_API_KEY=sk-...  # embeddings use OpenAI by default
+```
+
+LLM and embedding backends are fully independent — you can use different providers for each.
+
+### Defaults
 
 | Parameter | Value |
 |-----------|-------|
-| Model | `gpt-4.1-mini` |
+| Model | `gpt-4.1-mini` (configurable) |
 | Max tokens per call | ~10,000 |
 | Token estimation | ~4 chars per token |
-| Embedding model | `text-embedding-3-small` |
-| Embedding dimensions | 1536 |
+| Embedding model | `text-embedding-3-small` (configurable) |
+| Embedding dimensions | 1536 (configurable) |
 
 ### Tool Definitions
 

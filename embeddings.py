@@ -1,3 +1,4 @@
+import os
 import struct
 import math
 from datetime import datetime, UTC
@@ -8,8 +9,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI()
-EMBEDDING_MODEL = "text-embedding-3-small"
+# Configurable embedding backend via environment variables:
+#   PYRAMID_EMBEDDING_BASE_URL  — OpenAI-compatible API base (default: OpenAI)
+#   PYRAMID_EMBEDDING_API_KEY   — API key (falls back to PYRAMID_LLM_API_KEY, then OPENAI_API_KEY)
+#   PYRAMID_EMBEDDING_MODEL     — Model name (default: text-embedding-3-small)
+#   PYRAMID_EMBEDDING_DIM       — Embedding dimensions (default: 1536)
+#
+# Examples:
+#   OpenAI (default):  OPENAI_API_KEY=sk-...
+#   Ollama:            PYRAMID_EMBEDDING_BASE_URL=http://localhost:11434/v1 PYRAMID_EMBEDDING_MODEL=nomic-embed-text
+#   Voyage AI:         PYRAMID_EMBEDDING_BASE_URL=https://api.voyageai.com/v1 PYRAMID_EMBEDDING_API_KEY=pa-...
+
+_embed_kwargs = {}
+_base_url = os.environ.get('PYRAMID_EMBEDDING_BASE_URL')
+_api_key = os.environ.get('PYRAMID_EMBEDDING_API_KEY') or os.environ.get('PYRAMID_LLM_API_KEY')
+
+if _base_url:
+    _embed_kwargs['base_url'] = _base_url
+if _api_key:
+    _embed_kwargs['api_key'] = _api_key
+
+client = OpenAI(**_embed_kwargs)
+EMBEDDING_MODEL = os.environ.get('PYRAMID_EMBEDDING_MODEL', 'text-embedding-3-small')
+EMBEDDING_DIM = int(os.environ.get('PYRAMID_EMBEDDING_DIM', '1536'))
+
+TIME_DECAY_HALF_LIFE_DAYS = 30
 
 
 def format_temporal_prefix(timestamp, end_timestamp=None):
@@ -32,8 +56,6 @@ def format_temporal_prefix(timestamp, end_timestamp=None):
 def enrich_for_embedding(text, timestamp, end_timestamp=None):
     prefix = format_temporal_prefix(timestamp, end_timestamp)
     return f"{prefix}{text}"
-EMBEDDING_DIM = 1536
-TIME_DECAY_HALF_LIFE_DAYS = 30
 
 
 MAX_TOKENS_PER_REQUEST = 250000
