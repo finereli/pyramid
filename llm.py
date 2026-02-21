@@ -6,11 +6,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL = 'gpt-4.1-mini'
+# Configurable LLM backend via environment variables:
+#   PYRAMID_LLM_BASE_URL  — OpenAI-compatible API base (default: OpenAI)
+#   PYRAMID_LLM_API_KEY   — API key (falls back to OPENAI_API_KEY)
+#   PYRAMID_LLM_MODEL     — Model name (default: gpt-4.1-mini)
+#
+# Examples:
+#   OpenAI (default):     OPENAI_API_KEY=sk-...
+#   Anthropic (via proxy): PYRAMID_LLM_BASE_URL=https://api.anthropic.com/v1 PYRAMID_LLM_API_KEY=sk-ant-...
+#   OpenClaw gateway:     PYRAMID_LLM_BASE_URL=http://192.168.1.30:18789/v1 PYRAMID_LLM_API_KEY=gateway-token
+#   Ollama:               PYRAMID_LLM_BASE_URL=http://localhost:11434/v1 PYRAMID_LLM_API_KEY=unused
+
+MODEL = os.environ.get('PYRAMID_LLM_MODEL', 'gpt-4.1-mini')
 MAX_TOKENS = 10000
 CHARS_PER_TOKEN = 4
 
-client = OpenAI()
+_llm_kwargs = {}
+_base_url = os.environ.get('PYRAMID_LLM_BASE_URL')
+_api_key = os.environ.get('PYRAMID_LLM_API_KEY')
+
+if _base_url:
+    _llm_kwargs['base_url'] = _base_url
+if _api_key:
+    _llm_kwargs['api_key'] = _api_key
+
+client = OpenAI(**_llm_kwargs)
 
 OBSERVE_TOOL = {
     "type": "function",
